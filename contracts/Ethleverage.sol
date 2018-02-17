@@ -1,5 +1,7 @@
 pragma solidity ^0.4.18;
 
+import "./ICDPContract.sol";
+
 //To-Do: be sure to complete the ETH_Address authorization
 contract Ethleverage {
 
@@ -12,16 +14,18 @@ contract Ethleverage {
 		uint layers;				// number of layers down
 		uint prinContr;			// principle contribution in Eth
 		uint LR; 						// liquidation ratio
-		bytes32[] cdps;			//array of CDPs
+		bytes32[] CDPs;			//array of CDPs
 	}
 
 	mapping (address => Investor) public investors;
 	address[] public investorAddresses;
+
 	address public CDPContract;
 	address public DaiContract;
 	address public wethContract;
 	address public pethContract;
 	address public owner;
+
 	uint public eth2Wei = 1e18;
 
 
@@ -36,46 +40,69 @@ contract Ethleverage {
 		owner = msg.sender;
 		CDPContract = _CDPaddr;
 		DaiContract = _Daiaddr;
+
 		wethContract = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 		pethContract = 0xf53AD2c6851052A81B42133467480961B2321C09;
-		CPDContract.approve(address(this));
+		ICDPContract(CDPContract).approve(address(this));
+
+
+
 	}
 
-
+	/* Workflow
+	1. Convert ETH into WETH,
+	2. Convert WETH into PETH,
+	3. Open CDP
+	4. Deposit PETH into CDP,
+	5. Withdraw DAI,
+	6. Purchase WETH with DAI via decentralized exchange
+	7. Convert WETH into PETH
+	*/
 	function leverage(/*uint _pricefloor*/) payable public returns (bool sufficient) {
 		//TO-DO: w/ price floor or leverage ratio, determine the number of layers and LR
 		uint calcLR;
-		constant uint layers = 4;
 		uint recycledPeth;
+		uint layers = 4;
 
 
 		Investor memory sender;
 		sender = investors[msg.sender];
 		investorAddresses.push(msg.sender);
-		sender.layers = layers; //fixed at 4
+
+		sender.layers = layers;
 		sender.prinContr = msg.value;
 		sender.LR = calcLR;
 
 
 		recycledPeth = sender.prinContr;
+
 		// for email contract reference: https://github.com/makerdao/sai/blob/master/src/tub.sol
 		for (uint i = 0; i < layers; i++) {
 			  /* workflow -> 1. Convert ETH into WETH, 2. Convert WETH into PETH, 3. Open CDP
 				   4. Deposit PETH into CDP, 5. Withdraw DAI, 6. Purchase WETH with DAI via decentralized exchange
 					 7. Convert WETH into PETH */
+
+
 			  wethContract.transfer(recycledPeth); // 1. convert eth into WETH
 				pethContract.approve(address(this), recycledPeth); // 2a. approve WETH to PETH conversion -> may not be needed
 				CDPContract.join(recycledPeth);// 2b. Convert WETH into PETH
-				sender.cdps.push(CDPContract.open()); // 3. open CDPContract and put CDP info into array
-				CDPContract.lock(sender.cdps[i], recycledPeth); // 4. deposit PETH into CDP
-				CDPContract.draw(sender.cdps[i], recycledPeth); // 5. withdraw DAI
+
+				// Step 3. Open CDPContract and put CDP info to array
+				bytes32 CDPInfo = ICDPContract(CDPContract).open();
+				sender.CDPs[i] = CDPInfo;
+
+				 // 4. deposit PETH into CDP
+				CDPContract.lock(sender.cdps[i], recycledPeth);
+
+				 // 5. withdraw DAI
+				CDPContract.draw(sender.cdps[i], recycledPeth);
 
 
 
 
 
-				//To-Do: 6. get Weth w/ Dia 7. Convert weth to peth
-				//recycledPeth = 7.
+			//To-Do: 6. get Weth w/ Dia 7. Convert weth to peth
+			//recycledPeth = 7.
 
 			}
 
