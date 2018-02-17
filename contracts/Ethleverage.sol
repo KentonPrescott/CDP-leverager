@@ -17,10 +17,10 @@ contract Ethleverage {
 	mapping (address => Investor) public investors;
 	address[] public investorAddresses;
 	address public CDPContract;
+	address public DaiContract
 	address public owner;
 	uint public eth2Wei = 1e18;
-	address kovanSai = 0x95878488a599e1d821C0fF2Bc079b9e7F96d95bE;
-	address kovanTub = 0xa6bfc88aa5a5981a958f9bcb885fcb3db0bf941e;
+
 
 	//Modifiers
 	modifier onlyOwner {
@@ -29,9 +29,10 @@ contract Ethleverage {
 	}
 
 	//Functions
-	function Ethleverage(address _addr) public {
+	function Ethleverage(address _CDPaddr, address _Daiaddr) public {
 		owner = msg.sender;
-		CDPContract = _addr;
+		CDPContract = _CDPaddr;
+		DaiContract = _Daiaddr;
 	}
 
 	function leverage(uint _pricefloorORLeverage) payable public returns (bool sufficient) {
@@ -54,7 +55,7 @@ contract Ethleverage {
 					// TO-DO: still need to transfer ownership
 					CDPContract.draw(sender.cdps[i], recycledEth*eth2Wei);
 
-					success = CDPContract.transfer()
+					success = DaiContract.transfer()
 					//recycledEth =
 
 			}

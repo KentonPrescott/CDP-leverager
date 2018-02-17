@@ -8,5 +8,10 @@ module.exports = {
       port: 7545,
       network_id: '*' // Match any network id
     }
+    kovan: { //reference https://kovan-testnet.github.io/website/
+      host: 'localhost',
+      port: 8545,
+      network_id: '42'
+    }
   }
 }
