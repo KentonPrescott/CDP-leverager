@@ -16,30 +16,32 @@ contract Ethleverage {
 
 	mapping (address => Investor) public investors;
 	address[] public investorAddresses;
-	address public CDPContract; //tub.sol <- inherited from sai
-	address public contractCreator;
+	address public CDPContract;
+	address public owner;
 	uint public eth2Wei = 1e18;
-	address kovanSai = 0x95878488a599e1d821c0ff2bc079b9e7f96d95be;
+	address kovanSai = 0x95878488a599e1d821C0fF2Bc079b9e7F96d95bE;
 	address kovanTub = 0xa6bfc88aa5a5981a958f9bcb885fcb3db0bf941e;
 
 	//Modifiers
-	modifier onlyCreator {
-		require(msg.sender == manager);
+	modifier onlyOwner {
+		require(msg.sender == owner);
 			_;
 	}
 
 	//Functions
 	function Ethleverage(address _addr) public {
-		contractCreator = msg.sender;
+		owner = msg.sender;
 		CDPContract = _addr;
 	}
 
 	function leverage(uint _pricefloorORLeverage) payable public returns (bool sufficient) {
 		//TO-DO: w/ price floor or leverage ratio, determine the number of layers and LR
 
-		sender = investors[msg.sender];
+
+		Investor memory sender = investors[msg.sender];
 		investorAddresses.push(sender);
 		sender.layers = 1; //production = calcLayers; test = 1
+
 		sender.prinContr = msg.value;
 		sender.LR = calcLR;
 
