@@ -19,6 +19,8 @@ contract Ethleverage {
 	address[] public investorAddresses;
 	address public CDPContract;
 	address public DaiContract;
+	address public wethContract;
+	address public pethContract;
 	address public owner;
 	uint public eth2Wei = 1e18;
 
@@ -34,7 +36,9 @@ contract Ethleverage {
 		owner = msg.sender;
 		CDPContract = _CDPaddr;
 		DaiContract = _Daiaddr;
-		CPDContract.approve(this.address);
+		wethContract = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+		pethContract = 0xf53AD2c6851052A81B42133467480961B2321C09;
+		CPDContract.approve(address(this));
 	}
 
 
@@ -44,6 +48,7 @@ contract Ethleverage {
 		constant uint layers = 4;
 		uint recycledPeth;
 
+
 		Investor memory sender;
 		sender = investors[msg.sender];
 		investorAddresses.push(msg.sender);
@@ -51,16 +56,23 @@ contract Ethleverage {
 		sender.prinContr = msg.value;
 		sender.LR = calcLR;
 
+
 		recycledPeth = sender.prinContr;
 		// for email contract reference: https://github.com/makerdao/sai/blob/master/src/tub.sol
 		for (uint i = 0; i < layers; i++) {
 			  /* workflow -> 1. Convert ETH into WETH, 2. Convert WETH into PETH, 3. Open CDP
 				   4. Deposit PETH into CDP, 5. Withdraw DAI, 6. Purchase WETH with DAI via decentralized exchange
 					 7. Convert WETH into PETH */
-
+			  wethContract.transfer(recycledPeth); // 1. convert eth into WETH
+				pethContract.approve(address(this), recycledPeth); // 2a. approve WETH to PETH conversion -> may not be needed
+				CDPContract.join(recycledPeth);// 2b. Convert WETH into PETH
 				sender.cdps.push(CDPContract.open()); // 3. open CDPContract and put CDP info into array
-				CDPContract.lock(sender.cdps[i], recycledPeth*eth2Wei); // 4. deposit PETH into CDP
-				CDPContract.draw(sender.cdps[i], recycledPeth*eth2Wei); // 5. withdraw DAI
+				CDPContract.lock(sender.cdps[i], recycledPeth); // 4. deposit PETH into CDP
+				CDPContract.draw(sender.cdps[i], recycledPeth); // 5. withdraw DAI
+
+
+
+
 
 				//To-Do: 6. get Weth w/ Dia 7. Convert weth to peth
 				//recycledPeth = 7.
