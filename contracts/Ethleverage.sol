@@ -5,6 +5,7 @@ contract Ethleverage {
 
 	//events
 	event LogCDPAddressChanged(address oldAddress, address newAddress);
+	event LogDaiAddressChanged(address oldAddress, address newAddress);
 
 	//Variables
 	struct Investor {
@@ -33,30 +34,36 @@ contract Ethleverage {
 		owner = msg.sender;
 		CDPContract = _CDPaddr;
 		DaiContract = _Daiaddr;
+		CPDContract.approve(this.address);
 	}
 
-	function leverage(uint _pricefloorORLeverage) payable public returns (bool sufficient) {
+
+	function leverage(/*uint _pricefloor*/) payable public returns (bool sufficient) {
 		//TO-DO: w/ price floor or leverage ratio, determine the number of layers and LR
+		uint calcLR;
+		constant uint layers = 4;
+		uint recycledPeth;
 
-
-		Investor memory sender = investors[msg.sender];
-		investorAddresses.push(sender);
-		sender.layers = 1; //production = calcLayers; test = 1
-
+		Investor memory sender;
+		sender = investors[msg.sender];
+		investorAddresses.push(msg.sender);
+		sender.layers = layers; //fixed at 4
 		sender.prinContr = msg.value;
 		sender.LR = calcLR;
 
-		recycledEth = sender.prinContr;
+		recycledPeth = sender.prinContr;
 		// for email contract reference: https://github.com/makerdao/sai/blob/master/src/tub.sol
-		for (uint i = 0; i < calcLayers; i++) {
-					// take out a CDPContract
-					sender.cdps.push(CDPContract.open());
-					CDPContract.lock(sender.cdps[i], recycledEth*eth2Wei); //TO-DO: need to check the amount of wad sent!
-					// TO-DO: still need to transfer ownership
-					CDPContract.draw(sender.cdps[i], recycledEth*eth2Wei);
+		for (uint i = 0; i < layers; i++) {
+			  /* workflow -> 1. Convert ETH into WETH, 2. Convert WETH into PETH, 3. Open CDP
+				   4. Deposit PETH into CDP, 5. Withdraw DAI, 6. Purchase WETH with DAI via decentralized exchange
+					 7. Convert WETH into PETH */
 
-					success = DaiContract.transfer();
-					//recycledEth =
+				sender.cdps.push(CDPContract.open()); // 3. open CDPContract and put CDP info into array
+				CDPContract.lock(sender.cdps[i], recycledPeth*eth2Wei); // 4. deposit PETH into CDP
+				CDPContract.draw(sender.cdps[i], recycledPeth*eth2Wei); // 5. withdraw DAI
+
+				//To-Do: 6. get Weth w/ Dia 7. Convert weth to peth
+				//recycledPeth = 7.
 
 			}
 
@@ -64,11 +71,19 @@ contract Ethleverage {
 	 }
 
 		// Update the address of the makerDAO CDP contract
-	function setCdpContract(address _addr) onlyOwner public returns (bool success) {
+   function setCdpContract(address _addr) onlyOwner public returns (bool success) {
 		require(_addr != address(0));
 		address old = CDPContract;
 		CDPContract = _addr;
 		LogCDPAddressChanged(old, _addr);
 		return true;
 	 }
+
+	 function setDaiContract(address _addr) onlyOwner public returns (bool success) {
+		 require(_addr != address(0));
+		 address old = DaiContract;
+		 DaiContract = _addr;
+		 LogDaiAddressChanged(old, _addr);
+		 return true;
+		}
 }
