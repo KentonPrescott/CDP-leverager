@@ -44,6 +44,13 @@ contract Ethleverage {
 		wethContract = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 		pethContract = 0xf53AD2c6851052A81B42133467480961B2321C09;
 		ICDPContract(CDPContract).approve(address(this));
+		ontract.approve(TubContract, allowance)
+
+		PethContract.approve(TubContract, allowance)
+
+		DaiContract.approve(TubContract, allowance)
+
+		MKRContract.approve(TubContract, allowance)
 
 
 
@@ -82,10 +89,13 @@ contract Ethleverage {
 				   4. Deposit PETH into CDP, 5. Withdraw DAI, 6. Purchase WETH with DAI via decentralized exchange
 					 7. Convert WETH into PETH */
 
+			  // 1. convert eth into WETH
+			  wethContract.transfer(recycledPeth);
 
-			  wethContract.transfer(recycledPeth); // 1. convert eth into WETH
-				pethContract.approve(address(this), recycledPeth); // 2a. approve WETH to PETH conversion -> may not be needed
-				CDPContract.join(recycledPeth);// 2b. Convert WETH into PETH
+				// 2a. approve WETH to PETH conversion -> may not be needed
+				// 2b. Convert WETH into PETH
+				pethContract.approve(address(this), recycledPeth);
+				CDPContract.join(recycledPeth);
 
 				// Step 3. Open CDPContract and put CDP info to array
 				bytes32 CDPInfo = ICDPContract(CDPContract).open();
