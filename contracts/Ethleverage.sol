@@ -36,7 +36,7 @@ contract Ethleverage {
 		//TO-DO: w/ price floor or leverage ratio, determine the number of layers and LR
 
 		// require()
-		sender = investors[msg.sender];
+		Investor memory sender = investors[msg.sender];
 		investorAddresses.push(senderAdd);
 		sender.layers = calcLayers;
 		sender.prinContr = msg.value;
