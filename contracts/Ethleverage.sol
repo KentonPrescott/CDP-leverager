@@ -34,7 +34,7 @@ contract Ethleverage {
 		owner = msg.sender;
 		CDPContract = _CDPaddr;
 		DaiContract = _Daiaddr;
-		CPDContract.approve(this.address);
+		CPDContract.approve(address(this));
 	}
 
 
