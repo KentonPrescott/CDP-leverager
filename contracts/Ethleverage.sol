@@ -16,9 +16,11 @@ contract Ethleverage {
 
 	mapping (address => Investor) public investors;
 	address[] public investorAddresses;
-	address public CDPContract;
+	address public CDPContract; //tub.sol <- inherited from sai
 	address public contractCreator;
 	uint public eth2Wei = 1e18;
+	address kovanSai = 0x95878488a599e1d821c0ff2bc079b9e7f96d95be;
+	address kovanTub = 0xa6bfc88aa5a5981a958f9bcb885fcb3db0bf941e;
 
 	//Modifiers
 	modifier onlyCreator {
@@ -35,10 +37,9 @@ contract Ethleverage {
 	function leverage(uint _pricefloorORLeverage) payable public returns (bool sufficient) {
 		//TO-DO: w/ price floor or leverage ratio, determine the number of layers and LR
 
-		require()
 		sender = investors[msg.sender];
-		investorAddresses.push(senderAdd);
-		sender.layers = calcLayers;
+		investorAddresses.push(sender);
+		sender.layers = 1; //production = calcLayers; test = 1
 		sender.prinContr = msg.value;
 		sender.LR = calcLR;
 
@@ -50,7 +51,9 @@ contract Ethleverage {
 					CDPContract.lock(sender.cdps[i], recycledEth*eth2Wei); //TO-DO: need to check the amount of wad sent!
 					// TO-DO: still need to transfer ownership
 					CDPContract.draw(sender.cdps[i], recycledEth*eth2Wei);
-					recycledEth = CDPContract.transfer;
+
+					success = CDPContract.transfer()
+					//recycledEth =
 
 			}
 
