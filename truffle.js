@@ -1,5 +1,8 @@
 // Allows us to use ES6 in our migrations and tests.
-//require('babel-register')
+require('babel-register')
+const secrets = require('./secrets.json');
+const infura = require('./infura.json');
+const HDWalletProvider = require('truffle-hdwallet-provider');
 
 module.exports = {
   networks: {
@@ -8,10 +11,13 @@ module.exports = {
       port: 7545,
       network_id: '*' // Match any network id
     },
-    kovan: { //reference https://kovan-testnet.github.io/website/
-      host: 'localhost',
-      port: 8545,
-      network_id: '42'
-    }
+    kovan: {
+      gas: 4712388,
+      gasPrice: 10000000000,
+      provider: function() {
+        return new HDWalletProvider(secrets.mnemonic, 'https://kovan.infura.io/' + infura.token)
+      },
+      network_id: 42, // Official ID of the Kovan Network
+    },
   }
 }
