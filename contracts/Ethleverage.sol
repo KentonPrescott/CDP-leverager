@@ -17,7 +17,7 @@ contract Ethleverage {
 	mapping (address => Investor) public investors;
 	address[] public investorAddresses;
 	address public CDPContract;
-	address public DaiContract
+	address public DaiContract;
 	address public owner;
 	uint public eth2Wei = 1e18;
 
@@ -55,7 +55,7 @@ contract Ethleverage {
 					// TO-DO: still need to transfer ownership
 					CDPContract.draw(sender.cdps[i], recycledEth*eth2Wei);
 
-					success = DaiContract.transfer()
+					success = DaiContract.transfer();
 					//recycledEth =
 
 			}
@@ -71,8 +71,4 @@ contract Ethleverage {
 		LogCDPAddressChanged(old, _addr);
 		return true;
 	 }
-
-
-
-
 }
