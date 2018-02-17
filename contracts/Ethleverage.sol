@@ -17,25 +17,25 @@ contract Ethleverage {
 	mapping (address => Investor) public investors;
 	address[] public investorAddresses;
 	address public CDPContract;
-	address public contractCreator;
+	address public owner;
 	uint public eth2Wei = 1e18;
 
 	//Modifiers
-	modifier onlyCreator {
-		require(msg.sender == manager);
+	modifier onlyOwner {
+		require(msg.sender == owner);
 			_;
 	}
 
 	//Functions
 	function Ethleverage(address _addr) public {
-		contractCreator = msg.sender;
+		owner = msg.sender;
 		CDPContract = _addr;
 	}
 
 	function leverage(uint _pricefloorORLeverage) payable public returns (bool sufficient) {
 		//TO-DO: w/ price floor or leverage ratio, determine the number of layers and LR
 
-		require()
+		// require()
 		sender = investors[msg.sender];
 		investorAddresses.push(senderAdd);
 		sender.layers = calcLayers;
