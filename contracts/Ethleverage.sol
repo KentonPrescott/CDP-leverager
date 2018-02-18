@@ -36,6 +36,9 @@ contract Ethleverage {
   address public wethContract;
   address public pethContract;
   address public MKRContract;
+	address public moneyMakerKovan = 0xd87856163f409777df41ddfbf37a66369e028fa9;
+	ERC20 public kWeth = ERC20(0xd0A1E359811322d97991E03f863a0C30C2cF029C);
+  ERC20 public kDai  = ERC20(0xC4375B7De8af5a38a93548eb8453a498222C4fF2);
 
   uint public makerLR;
   uint public ethCap = 10000;
@@ -72,19 +75,23 @@ contract Ethleverage {
 
 
 
+
   }
 
 	function initialize() public {
-		ICDPContract(CDPContract).approve(address(this));
 
 
-		IwethContract(wethContract).approve(CDPContract, ethCap);
-		IpethContract(pethContract).approve(CDPContract, ethCap);
-		IDaiContract(DaiContract).approve(CDPContract, ethCap);
-		IMKRContract(MKRContract).approve(CDPContract, ethCap);
+		require(ICDPContract(CDPContract).approve(address(this)), 1000);
 
-		IwethContract(wethContract).approve(address(this), ethCap);
-		IpethContract(pethContract).approve(address(this), ethCap);
+
+		require(IwethContract(wethContract).approve(CDPContract, ethCap));
+		require(IpethContract(pethContract).approve(CDPContract, ethCap));
+		require(IDaiContract(DaiContract).approve(CDPContract, ethCap));
+		require(IMKRContract(MKRContract).approve(CDPContract, ethCap));
+
+		require(IwethContract(wethContract).approve(address(this), ethCap));
+		require(IpethContract(pethContract).approve(address(this), ethCap));
+
 	}
 
   // for email contract reference: https://github.com/makerdao/sai/blob/master/src/tub.sol
@@ -136,8 +143,9 @@ contract Ethleverage {
          // 5. withdraw DAI
         ICDPContract(CDPContract).draw(sender.cdps, DaiAmount); // may need to use liquidation ratio in this!
 
-        //6. trade DAI for weth
+        //6. buy weth, sell dai
         //OasisMarket.sellAllAmount(DaiContract, DaiAmount, WethContract, min_fill_amount)
+				recycledPeth = IMarketMaker(moneyMakerKovan).buyAllEthWithDai().div(1e18);
         //recycledPeth = wethReceived
 
         //Assign the last DaiAmount recieved in the loop
@@ -175,8 +183,7 @@ contract Ethleverage {
        ICDPContract(CDPContract).exit(releasedPeth);
 
        //4. trade some ethereum for DAI
-       //DaiAmount = OasisMarket.buyAllAmount(ERC20 buy_gem, uint buy_amt, ERC20 pay_gem, uint max_fill_amount)
-
+       DaiAmount = IMarketMaker(moneyMakerKovan).sellAllEthForDai();
 
        //5. wipe off some of the the debt by paying back some of the Dai amount
        ICDPContract(CDPContract).wipe(sender.cdps, DaiAmount);
