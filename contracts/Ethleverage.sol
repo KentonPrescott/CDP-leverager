@@ -1,11 +1,11 @@
 pragma solidity ^0.4.18;
 
-import "./ICDPContract.sol";
-import "./IDaiContract.sol";
-import "./IwethContract.sol";
-import "./IpethContract.sol";
-import "./IMKRContract.sol";
 import "./SafeMath.sol";
+import "./Interface/ICDPContract.sol";
+import "./Interface/IDaiContract.sol";
+import "./Interface/IwethContract.sol";
+import "./Interface/IpethContract.sol";
+import "./Interface/IMKRContract.sol";
 
 
 //To-Do: be sure to complete the ETH_Address authorization
@@ -29,12 +29,14 @@ contract Ethleverage {
   mapping (address => Investor) public investors;
   address[] public investorAddresses;
 
+  address public owner;
+
   address public CDPContract;
   address public DaiContract;
   address public wethContract;
   address public pethContract;
   address public MKRContract;
-  address public owner;
+
   uint public makerLR;
   uint public ethCap = 10000;
   uint public layers = 3;
@@ -52,7 +54,14 @@ contract Ethleverage {
   }
 
   //Functions
-  function Ethleverage(address _CDPaddr, address _Daiaddr, address _wethaddr, address _pethaddr address _mkrContract, uint _liquidationRatio) public {
+  function Ethleverage(
+    address _CDPaddr, 
+    address _Daiaddr, 
+    address _wethaddr, 
+    address _pethaddr, 
+    address _mkrContract, 
+    uint _liquidationRatio
+  ) public {
     owner = msg.sender;
     CDPContract = _CDPaddr;
     DaiContract = _Daiaddr;
@@ -87,6 +96,7 @@ contract Ethleverage {
   6. Purchase WETH with DAI via decentralized exchange
   7. Convert WETH into PETH
   */
+
   function leverage(uint _ethMarketPrice, uint _priceFloor) payable public returns (bool sufficient) {
     //TO-DO: w/ price floor or leverage ratio, determine the number of layers and LR
     uint calcCR = (_ethMarketPrice.mul(makerLR)).div(_priceFloor);
@@ -128,7 +138,7 @@ contract Ethleverage {
         //recycledPeth = wethReceived
 
         //Assign the last DaiAmount recieved in the loop
-        daiAmountFinal = DaiAmount;
+        sender.daiAmountFinal = DaiAmount;
 
         DaiAmount = (recycledPeth.mul(_ethMarketPrice)).div(sender.CR);
 
