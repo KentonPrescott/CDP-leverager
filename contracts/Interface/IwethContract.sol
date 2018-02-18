@@ -1,7 +1,7 @@
-pragma solidity ^0.4.18;
+pragma solidity ^0.4.16;
 
 contract IwethContract {
   function approve(address guy, uint wad) public returns (bool);
 
-  function IwethContract() payable returns (bool success);
+  function() payable public ;
 }

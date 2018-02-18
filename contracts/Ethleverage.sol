@@ -1,4 +1,4 @@
-pragma solidity ^0.4.18;
+pragma solidity ^0.4.16;
 
 import "./SafeMath.sol";
 import "./Interface/ICDPContract.sol";
@@ -49,17 +49,17 @@ contract Ethleverage {
   }
 
   modifier onlyInvestor {
-    require(investors[msg.sender].prinContr != "");
+    require(investors[msg.sender].prinContr != 0);
     _;
   }
 
   //Functions
   function Ethleverage(
-    address _CDPaddr, 
-    address _Daiaddr, 
-    address _wethaddr, 
-    address _pethaddr, 
-    address _mkrContract, 
+    address _CDPaddr,
+    address _Daiaddr,
+    address _wethaddr,
+    address _pethaddr,
+    address _mkrContract,
     uint _liquidationRatio
   ) public {
     owner = msg.sender;
@@ -97,9 +97,9 @@ contract Ethleverage {
   7. Convert WETH into PETH
   */
 
-  function leverage(uint _ethMarketPrice, uint _priceFloor) payable public returns (bool sufficient) {
+  function leverage(uint256 _ethMarketPrice, uint256 _priceFloor) payable public returns (bool sufficient) {
     //TO-DO: w/ price floor or leverage ratio, determine the number of layers and LR
-    uint calcCR = (_ethMarketPrice.mul(makerLR)).div(_priceFloor);
+    uint256  calcCR = (_ethMarketPrice.mul(makerLR)).div(_priceFloor);
 
 
     Investor memory sender;
@@ -152,19 +152,21 @@ contract Ethleverage {
 
      Investor memory sender;
      sender = investors[msg.sender];
+		 uint DaiAmount;
+		 uint releasedPeth;
 
      //assign the final dai amount to the amount of dai that must be iterated
      DaiAmount = sender.daiAmountFinal;
 
      //1. wipe off some of the the debt by paying back some of the Dai amount
-     ICDPContract(CDPContract).wipe(sender.cpds, DaiAmount);
+     ICDPContract(CDPContract).wipe(sender.cdps, DaiAmount);
 
 
      for (uint i = 0; i < sender.layers; i++) {
 
        //2. free up some of the collatoral (PETH) because some of the debt has been wiped
        releasedPeth = DaiAmount.mul(sender.CR);
-       ICDPContract(CDPContract).free(sender.cpds, releasedPeth);
+       ICDPContract(CDPContract).free(sender.cdps, releasedPeth);
 
        //3. convert PETH to WETH
        ICDPContract(CDPContract).exit(releasedPeth);
@@ -174,12 +176,12 @@ contract Ethleverage {
 
 
        //5. wipe off some of the the debt by paying back some of the Dai amount
-       ICDPContract(CDPContract).wipe(sender.cpds, DaiAmount);
+       ICDPContract(CDPContract).wipe(sender.cdps, DaiAmount);
      }
 
      //6. take out the remaining peth
      releasedPeth = DaiAmount.mul(sender.CR);
-     ICDPContract(CDPContract).free(sender.cpds, releasedPeth);
+     ICDPContract(CDPContract).free(sender.cdps, releasedPeth);
 
      //convert PETH to WETH
      ICDPContract(CDPContract).exit(releasedPeth);
@@ -187,16 +189,16 @@ contract Ethleverage {
      //convert WETH to ETH
 
      //close down the cpds
-     ICDPContract(CDPContract).shut(sender.cpds);
+     ICDPContract(CDPContract).shut(sender.cdps);
 
      //calculate the final eth amount that is recieved from the last wipe off
      sender.ethAmountFinal = (sender.CR).mul(DaiAmount);
 
      //Send final ethAmount back to investor
      msg.sender.transfer(sender.ethAmountFinal);
-
+		
      //delete the sender information
-
+		 delete investors[msg.sender];
 
      return true;
    }
@@ -204,7 +206,7 @@ contract Ethleverage {
    // Returns the variables contained in the Investor struct for a given address
   function getInvestor(address _addr) constant public
     returns (
-      uint layers,
+      uint _layers,
       uint prinContr,
       uint CR,
       bytes32 cdps,

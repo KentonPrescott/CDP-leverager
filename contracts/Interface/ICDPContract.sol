@@ -1,4 +1,4 @@
-pragma solidity ^0.4.18;
+pragma solidity ^0.4.16;
 
 // File found here:
 // https://github.com/makerdao/sai/blob/master/src/tub.sol
@@ -15,8 +15,6 @@ contract ICDPContract {
   function lock(bytes32 cup, uint wad) public /*note*/;
 
   function draw(bytes32 cup, uint wad) public /*note*/;
-
-  function wipe(bytes32 cup, uint wad) public /*note*/;
 
   function free(bytes32 cup, uint wad) public /*note*/;
 
