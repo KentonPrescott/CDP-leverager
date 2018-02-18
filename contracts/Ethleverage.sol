@@ -1,9 +1,16 @@
 pragma solidity ^0.4.18;
 
 import "./ICDPContract.sol";
+import "./IDaiContract.sol";
+import "./IwethContract.sol";
+import "./IpethContract.sol";
+import "./IMKRContract.sol";
+import "./SafeMath.sol";
+
 
 //To-Do: be sure to complete the ETH_Address authorization
 contract Ethleverage {
+	using SafeMath for uint;
 
 	//events
 	event LogCDPAddressChanged(address oldAddress, address newAddress);
@@ -13,7 +20,7 @@ contract Ethleverage {
 	struct Investor {
 		uint layers;				// number of layers down
 		uint prinContr;			// principle contribution in Eth
-		uint LR; 						// liquidation ratio
+		uint CR; 						// collatorization ratio
 		bytes32[] CDPs;			//array of CDPs
 	}
 
@@ -24,9 +31,10 @@ contract Ethleverage {
 	address public DaiContract;
 	address public wethContract;
 	address public pethContract;
+	address public MKRContract;
 	address public owner;
-
-	uint public eth2Wei = 1e18;
+	uint public makerLR;
+	uint public ethCap = 10000;
 
 
 	//Modifiers
@@ -36,25 +44,27 @@ contract Ethleverage {
 	}
 
 	//Functions
-	function Ethleverage(address _CDPaddr, address _Daiaddr) public {
+	function Ethleverage(address _CDPaddr, address _Daiaddr, address _wethaddr, address _pethaddr address _mkrContract, uint _liquidationRatio) public {
 		owner = msg.sender;
 		CDPContract = _CDPaddr;
 		DaiContract = _Daiaddr;
+		wethContract = _wethaddr;
+		pethContract = _pethaddr;
+		MKRContract = _mkrContract;
+		makerLR = _liquidationRatio;
 
-		wethContract = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-		pethContract = 0xf53AD2c6851052A81B42133467480961B2321C09;
 		ICDPContract(CDPContract).approve(address(this));
-		ontract.approve(TubContract, allowance)
 
-		PethContract.approve(TubContract, allowance)
-
-		DaiContract.approve(TubContract, allowance)
-
-		MKRContract.approve(TubContract, allowance)
-
-
+		IwethContract(wethContract).approve(CDPContract, ethCap);
+		IpethContract(pethContract).approve(CDPContract, ethCap);
+		IDaiContract(DaiContract).approve(CDPContract, ethCap);
+		IMKRContract(MKRContract).approve(CDPContract, ethCap);
 
 	}
+
+
+	// for email contract reference: https://github.com/makerdao/sai/blob/master/src/tub.sol
+	// for workflow reference: https://docs.google.com/document/d/1_7pvv49dYJHIlMkaEqBgLOz77F-dt_BImKWRS2ZtFcE/mobilebasic
 
 	/* Workflow
 	1. Convert ETH into WETH,
@@ -65,10 +75,9 @@ contract Ethleverage {
 	6. Purchase WETH with DAI via decentralized exchange
 	7. Convert WETH into PETH
 	*/
-	function leverage(/*uint _pricefloor*/) payable public returns (bool sufficient) {
+	function leverage(uint _ethMarketPrice, uint _priceFloor) payable public returns (bool sufficient) {
 		//TO-DO: w/ price floor or leverage ratio, determine the number of layers and LR
-		uint calcLR;
-		uint recycledPeth;
+		uint calcCR = (_ethMarketPrice.mul(makerLR)).div(_priceFloor);
 		uint layers = 4;
 
 
@@ -78,40 +87,39 @@ contract Ethleverage {
 
 		sender.layers = layers;
 		sender.prinContr = msg.value;
-		sender.LR = calcLR;
+		sender.CR = calcCR;
 
-
+		uint recycledPeth;
 		recycledPeth = sender.prinContr;
 
-		// for email contract reference: https://github.com/makerdao/sai/blob/master/src/tub.sol
-		for (uint i = 0; i < layers; i++) {
-			  /* workflow -> 1. Convert ETH into WETH, 2. Convert WETH into PETH, 3. Open CDP
-				   4. Deposit PETH into CDP, 5. Withdraw DAI, 6. Purchase WETH with DAI via decentralized exchange
-					 7. Convert WETH into PETH */
+		// 1. convert eth into WETH
+		//just in case the MakeGuy was wrong: wethContract.transfer(recycledPeth);
+		wethContract.send(recycledPeth);
 
-			  // 1. convert eth into WETH
-			  wethContract.transfer(recycledPeth);
+		for (uint i = 0; i < layers; i++) {
+
 
 				// 2a. approve WETH to PETH conversion -> may not be needed
 				// 2b. Convert WETH into PETH
-				pethContract.approve(address(this), recycledPeth);
-				CDPContract.join(recycledPeth);
+				IwethContract(wethContract).approve(address(this), ethCap); //may not be needed since we approve for ethCap at Constructor function
+				ICDPContract(CDPContract).join(recycledPeth);
+				//just in case the MakeGuy was wrong: pethContract.approve(address(this), recycledPeth);
 
 				// Step 3. Open CDPContract and put CDP info to array
 				bytes32 CDPInfo = ICDPContract(CDPContract).open();
 				sender.CDPs[i] = CDPInfo;
 
 				 // 4. deposit PETH into CDP
-				CDPContract.lock(sender.cdps[i], recycledPeth);
+				IpethContract(pethContract).approve(address(this), ethCap);
+				ICDPContract(CDPContract).lock(sender.cdps[i], recycledPeth);
 
 				 // 5. withdraw DAI
-				CDPContract.draw(sender.cdps[i], recycledPeth);
+				CDPContract.draw(sender.cdps[i], recycledPeth); // may need to use liquidation ratio in this!
 
+				//6.
+				//OasisMarket.sellAllAmount(DaiContract, DaiAmount, WethContract, min_fill_amount)
 
-
-
-
-			//To-Do: 6. get Weth w/ Dia 7. Convert weth to peth
+			//To-Do: Dia 7. Convert weth to peth
 			//recycledPeth = 7.
 
 			}
