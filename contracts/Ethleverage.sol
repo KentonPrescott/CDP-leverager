@@ -70,19 +70,22 @@ contract Ethleverage {
     MKRContract = _mkrContract;
     makerLR = _liquidationRatio;
 
-    ICDPContract(CDPContract).approve(address(this));
-
-    IwethContract(wethContract).approve(CDPContract, ethCap);
-    IpethContract(pethContract).approve(CDPContract, ethCap);
-    IDaiContract(DaiContract).approve(CDPContract, ethCap);
-    IMKRContract(MKRContract).approve(CDPContract, ethCap);
-
-    IwethContract(wethContract).approve(address(this), ethCap);
-    IpethContract(pethContract).approve(address(this), ethCap);
 
 
   }
 
+	function initialize() onlyOwner public {
+		ICDPContract(CDPContract).approve(address(this));
+
+
+		IwethContract(wethContract).approve(CDPContract, ethCap);
+		IpethContract(pethContract).approve(CDPContract, ethCap);
+		IDaiContract(DaiContract).approve(CDPContract, ethCap);
+		IMKRContract(MKRContract).approve(CDPContract, ethCap);
+
+		IwethContract(wethContract).approve(address(this), ethCap);
+		IpethContract(pethContract).approve(address(this), ethCap);
+	}
 
   // for email contract reference: https://github.com/makerdao/sai/blob/master/src/tub.sol
   // for workflow reference: https://docs.google.com/document/d/1_7pvv49dYJHIlMkaEqBgLOz77F-dt_BImKWRS2ZtFcE/mobilebasic
@@ -196,7 +199,7 @@ contract Ethleverage {
 
      //Send final ethAmount back to investor
      msg.sender.transfer(sender.ethAmountFinal);
-		
+
      //delete the sender information
 		 delete investors[msg.sender];
 

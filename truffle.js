@@ -13,7 +13,7 @@ module.exports = {
     },
     kovan: {
       gas: 5000000,
-      gasPrice: 10000000000,
+      gasPrice: 1000000000,
       provider: function() {
         return new HDWalletProvider(secrets.mnemonic, 'https://kovan.infura.io/' + infura.token)
       },
