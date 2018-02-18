@@ -13,5 +13,15 @@ contract ICDPContract {
 
   function draw(bytes32 cup, uint wad) public note {}
 
+  function wipe(bytes32 cup, uint wad) public note {}
+
+  function free(bytes32 cup, uint wad) public note {}
+
+  function exit(uint wad) public note {}
+
+  function wipe(bytes32 cup, uint wad) public note {}
+
+  function shut(bytes32 cup) public note {}
+
 
 }

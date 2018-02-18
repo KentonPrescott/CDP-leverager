@@ -21,7 +21,9 @@ contract Ethleverage {
 		uint layers;				// number of layers down
 		uint prinContr;			// principle contribution in Eth
 		uint CR; 						// collatorization ratio
-		bytes32[] CDPs;			//array of CDPs
+		bytes32 cdps;			//array of CDPs (only one!)
+		uint daiAmountFinal; 	//amount of Dai that an investor has after leveraging
+		uint ethAmountFinal; //resulting amount of ETH that an investor gets after liquidating
 	}
 
 	mapping (address => Investor) public investors;
@@ -35,6 +37,7 @@ contract Ethleverage {
 	address public owner;
 	uint public makerLR;
 	uint public ethCap = 10000;
+	uint public layers = 3;
 
 
 	//Modifiers
@@ -42,6 +45,11 @@ contract Ethleverage {
 		require(msg.sender == owner);
 			_;
 	}
+
+	modifier onlyInvestor {
+    require(investors[msg.sender].prinContr != "");
+    _;
+  }
 
 	//Functions
 	function Ethleverage(address _CDPaddr, address _Daiaddr, address _wethaddr, address _pethaddr address _mkrContract, uint _liquidationRatio) public {
@@ -82,7 +90,6 @@ contract Ethleverage {
 	function leverage(uint _ethMarketPrice, uint _priceFloor) payable public returns (bool sufficient) {
 		//TO-DO: w/ price floor or leverage ratio, determine the number of layers and LR
 		uint calcCR = (_ethMarketPrice.mul(makerLR)).div(_priceFloor);
-		uint layers = 4;
 
 
 		Investor memory sender;
@@ -96,37 +103,108 @@ contract Ethleverage {
 		uint recycledPeth;
 		recycledPeth = sender.prinContr;
 
+		// Step 3. Open CDPContract
+		bytes32 CDPInfo = ICDPContract(CDPContract).open();
+		sender.cdps = CDPInfo;
+
 		// 1. convert eth into WETH
 		//just in case the MakeGuy was wrong: wethContract.transfer(recycledPeth);
-		IwethContract(wethContract).send(recycledPeth);
+		IwethContract(wethContract).transfer(recycledPeth);
 		uint DaiAmount = _priceFloor.div(makerLR);
 
-		for (uint i = 0; i < layers; i++) {
+		for (uint i = 0; i < sender.layers; i++) {
 				// 2a. Convert WETH into PETH
 				ICDPContract(CDPContract).join(recycledPeth);
 				//just in case the MakeGuy was wrong: pethContract.approve(address(this), recycledPeth);
 
-				// Step 3. Open CDPContract and put CDP info to array
-				bytes32 CDPInfo = ICDPContract(CDPContract).open();
-				sender.cdps[i] = CDPInfo;
-
 				 // 4. deposit PETH into CDP
-				ICDPContract(CDPContract).lock(sender.cdps[i], recycledPeth);
+				ICDPContract(CDPContract).lock(sender.cdps, recycledPeth);
 
 				 // 5. withdraw DAI
-				ICDPContract(CDPContract).draw(sender.cdps[i], DaiAmount); // may need to use liquidation ratio in this!
+				ICDPContract(CDPContract).draw(sender.cdps, DaiAmount); // may need to use liquidation ratio in this!
 
 				//6. trade DAI for weth
 				//OasisMarket.sellAllAmount(DaiContract, DaiAmount, WethContract, min_fill_amount)
-
-				//To-Do: Dia 7.
 				//recycledPeth = wethReceived
+
+				//Assign the last DaiAmount recieved in the loop
+				daiAmountFinal = DaiAmount;
+
 				DaiAmount = (recycledPeth.mul(_ethMarketPrice)).div(sender.CR);
 
 			}
 
 		return true;
 	 }
+
+
+	 function liquidate() onlyInvestor public returns (bool sufficient) {
+
+		 Investor memory sender;
+ 		 sender = investors[msg.sender];
+
+		 //assign the final dai amount to the amount of dai that must be iterated
+		 DaiAmount = sender.daiAmountFinal;
+
+		 //1. wipe off some of the the debt by paying back some of the Dai amount
+		 ICDPContract(CDPContract).wipe(sender.cpds, DaiAmount);
+
+
+		 for (uint i = 0; i < sender.layers; i++) {
+
+			 //2. free up some of the collatoral (PETH) because some of the debt has been wiped
+			 releasedPeth = DaiAmount.mul(sender.CR);
+			 ICDPContract(CDPContract).free(sender.cpds, releasedPeth);
+
+			 //3. convert PETH to WETH
+			 ICDPContract(CDPContract).exit(releasedPeth);
+
+			 //4. trade some ethereum for DAI
+			 //DaiAmount = OasisMarket.buyAllAmount(ERC20 buy_gem, uint buy_amt, ERC20 pay_gem, uint max_fill_amount)
+
+
+			 //5. wipe off some of the the debt by paying back some of the Dai amount
+			 ICDPContract(CDPContract).wipe(sender.cpds, DaiAmount);
+		 }
+
+		 //6. take out the remaining peth
+		 releasedPeth = DaiAmount.mul(sender.CR);
+		 ICDPContract(CDPContract).free(sender.cpds, releasedPeth);
+
+		 //convert PETH to WETH
+		 ICDPContract(CDPContract).exit(releasedPeth);
+
+		 //convert WETH to ETH
+
+		 //close down the cpds
+		 ICDPContract(CDPContract).shut(sender.cpds);
+
+		 //calculate the final eth amount that is recieved from the last wipe off
+		 sender.ethAmountFinal = (sender.CR).mul(DaiAmount);
+
+		 //Send final ethAmount back to investor
+		 msg.sender.transfer(sender.ethAmountFinal);
+
+		 //delete the sender information
+
+
+		 return true;
+	 }
+
+	 // Returns the variables contained in the Investor struct for a given address
+  function getInvestor(address _addr) constant public
+    returns (
+		  uint layers,
+			uint prinContr,
+			uint CR,
+			bytes32 cdps,
+			uint daiAmountFinal,
+			uint ethAmountFinal
+    )
+  {
+    Investor storage investor = investors[_addr];
+    return (investor.layers, investor.prinContr, investor.CR, investor.cdps, investor.daiAmountFinal, investor.ethAmountFinal);
+  }
 
 		// Update the address of the makerDAO CDP contract
    function setCdpContract(address _addr) onlyOwner public returns (bool success) {
