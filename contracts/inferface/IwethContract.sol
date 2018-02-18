@@ -6,5 +6,7 @@ contract IwethContract {
 
   function approve(address guy, uint wad) public /*stoppable*/ returns (bool){}
 
+  function IwethContract() payable returns (bool success) {}
+
 
 }
