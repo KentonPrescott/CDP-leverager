@@ -74,7 +74,7 @@ contract Ethleverage {
 
   }
 
-	function initialize() onlyOwner public {
+	function initialize() public {
 		ICDPContract(CDPContract).approve(address(this));
 
 
