@@ -1,8 +1,7 @@
 pragma solidity ^0.4.18;
 
+// File found here:
+// https://github.com/makerdao/sai/blob/4b0c94b8ef2d8e0951dd0a0eee7c0fce5f5dbb49/src/weth9.sol
 contract IDaiContract {
-  // Commenting out the stoppable for now, but I think we'll need
-  // to inherit some more stuff. Not sure if this'll break stuff.
-  function approve(address guy, uint wad) public /*stoppable*/ returns (bool){}
-
+  function approve(address guy, uint wad) public returns (bool);
 }
