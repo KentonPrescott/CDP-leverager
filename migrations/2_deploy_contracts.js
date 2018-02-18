@@ -1,7 +1,7 @@
 var Ethleverage = artifacts.require("./Ethleverage.sol");
 
 const kovanSai = 0x95878488a599e1d821C0fF2Bc079b9e7F96d95bE;
-const kovanTub = 0xa6bfc88aa5a5981a958f9bcb885fcb3db0bf941e;
+const kovanTub = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
 const kovanWeth = 0xd0a1e359811322d97991e03f863a0c30c2cf029c;
 const kovanPeth = 0x1508d42373235103081bd4d223379469f686bc55;
 const kovanMKR = 0xaaf64bfcc32d0f15873a02163e7e500671a4ffcd;
