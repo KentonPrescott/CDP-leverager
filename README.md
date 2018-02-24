@@ -31,3 +31,7 @@ Once you have that all set up you can deploy to the [Kovan](https://kovan.ethers
 ``` 
 truffle migrate --network kovan
 ```
+
+## The Idea
+
+![Recursive Collateralization](/recursive-collateralization.png)
