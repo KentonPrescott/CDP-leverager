@@ -1,14 +1,14 @@
 var Ethleverage = artifacts.require("./Ethleverage.sol");
 
-const kovanSai = 0x95878488a599e1d821C0fF2Bc079b9e7F96d95bE;
+const kovanSai = 0xC4375B7De8af5a38a93548eb8453a498222C4fF2;
 const kovanTub = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
-const kovanWeth = 0xd0a1e359811322d97991e03f863a0c30c2cf029c;
-const kovanPeth = 0x1508d42373235103081bd4d223379469f686bc55;
-const kovanMKR = 0xaaf64bfcc32d0f15873a02163e7e500671a4ffcd;
+const kovanWeth = 0xd0A1E359811322d97991E03f863a0C30C2cF029C;
+const kovanPeth = 0xf4d791139cE033Ad35DB2B2201435fAd668B1b64;
+const kovanMKR = 0xAaF64BFCC32d0F15873a02163e7E500671a4ffcD;
 
 const wethContract = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 const pethContract = 0xf53AD2c6851052A81B42133467480961B2321C09;
-const LiquidationRatio = 1.5; //possibly 1.6 to account for governance fee
+const LiquidationRatio = 150; //possibly 1.6 to account for governance fee
 //need to add more here
 
 module.exports = function(deployer, network, accounts) {
@@ -17,7 +17,6 @@ module.exports = function(deployer, network, accounts) {
       deployer.deploy(Ethleverage, kovanTub, kovanSai, kovanWeth, kovanPeth, kovanMKR, LiquidationRatio);
     }
     else {
-      deployer.deploy(Ethleverage, kovanTub, kovanSai);
     }
 
 };

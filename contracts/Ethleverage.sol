@@ -7,6 +7,7 @@ import "./Interface/IwethContract.sol";
 import "./Interface/IpethContract.sol";
 import "./Interface/IMKRContract.sol";
 import "./Interface/IMoneyMaker.sol";
+import "./Interface/ILiquidator.sol";
 
 
 //To-Do: be sure to complete the ETH_Address authorization
@@ -14,6 +15,11 @@ contract Ethleverage {
   using SafeMath for uint;
 
   //events
+
+  event CDPOpened(bytes32 ID);
+  event PethLocked(bytes32 ID, uint recycledPeth);
+  event dai2Peth(uint recycledPeth);
+
   event LogCDPAddressChanged(address oldAddress, address newAddress);
   event LogDaiAddressChanged(address oldAddress, address newAddress);
 
@@ -38,6 +44,8 @@ contract Ethleverage {
   address public pethContract;
   address public MKRContract;
 	address public moneyMakerKovan = 0xd87856163f409777df41DDFBF37A66369E028FA9;
+  address public liquidKovan =  0xc936749D2D0139174EE0271bD28325074fdBC654; //https://github.com/makerdao/sai/blob/4b0c94b8ef2d8e0951dd0a0eee7c0fce5f5dbb49/src/tap.sol
+  address public unknownContract = 0xc936749D2D0139174EE0271bD28325074fdBC654; //https://kovan.etherscan.io/address/0xc936749d2d0139174ee0271bd28325074fdbc654
 
   uint public makerLR;
   uint public ethCap = 10000;
@@ -71,24 +79,31 @@ contract Ethleverage {
     pethContract = _pethaddr;
     MKRContract = _mkrContract;
     makerLR = _liquidationRatio;
-
-
-
-
   }
 
 	function initialize() public {
+      //for some reason the variables ARE initialized in the constructor function, but an error is thrown without reassigning them here.
+      owner = msg.sender;
+      moneyMakerKovan = 0xd87856163f409777df41DDFBF37A66369E028FA9;
+      liquidKovan =  0xc936749D2D0139174EE0271bD28325074fdBC654; //https://github.com/makerdao/sai/blob/4b0c94b8ef2d8e0951dd0a0eee7c0fce5f5dbb49/src/tap.sol
+      unknownContract = 0xc936749D2D0139174EE0271bD28325074fdBC654; //https://kovan.etherscan.io/address/0xc936749d2d0139174ee0271bd28325074fdbc654
+      makerLR = 151;
+      ethCap = 10000;
+      layers = 3;
+      DaiContract = 0xC4375B7De8af5a38a93548eb8453a498222C4fF2;
+      CDPContract = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
+      wethContract = 0xd0A1E359811322d97991E03f863a0C30C2cF029C;
+      pethContract = 0xf4d791139cE033Ad35DB2B2201435fAd668B1b64;
+      MKRContract = 0xAaF64BFCC32d0F15873a02163e7E500671a4ffcD;
 
-			ICDPContract(CDPContract).approve(address(this));
-
+    
 			IwethContract(wethContract).approve(CDPContract, ethCap);
+      IwethContract(wethContract).approve(unknownContract, ethCap);
 			IpethContract(pethContract).approve(CDPContract, ethCap);
+      IpethContract(pethContract).approve(unknownContract, ethCap);
 			IDaiContract(DaiContract).approve(CDPContract, ethCap);
+      IDaiContract(DaiContract).approve(unknownContract, ethCap);
 			IMKRContract(MKRContract).approve(CDPContract, ethCap);
-
-			IwethContract(wethContract).approve(address(this), ethCap);
-			IpethContract(pethContract).approve(address(this), ethCap);
-
 	}
 
   // for email contract reference: https://github.com/makerdao/sai/blob/master/src/tub.sol
@@ -106,53 +121,62 @@ contract Ethleverage {
 
   function leverage(uint256 _ethMarketPrice, uint256 _priceFloor) payable public returns (bool sufficient) {
     //TO-DO: w/ price floor or leverage ratio, determine the number of layers and LR
-    uint256  calcCR = (_ethMarketPrice.mul(makerLR)).div(_priceFloor);
+    uint256  calcCR = (_ethMarketPrice.mul(makerLR)).div(_priceFloor.mul(100));
 
-
+    //investor assignments
     Investor memory sender;
     sender = investors[msg.sender];
     investorAddresses.push(msg.sender);
-
     sender.layers = layers;
     sender.prinContr = msg.value;
     sender.CR = calcCR;
+
+    //external calls
+    ICDPContract tub = ICDPContract(CDPContract);
+    IwethContract weth = IwethContract(wethContract);
 
     uint recycledPeth;
     recycledPeth = sender.prinContr;
 
     // Step 3. Open CDPContract
-    bytes32 CDPInfo = ICDPContract(CDPContract).open();
+    bytes32 CDPInfo = tub.open();
     sender.cdps = CDPInfo;
+    CDPOpened(CDPInfo); //event
 
     // 1. convert eth into WETH
     //just in case the MakeGuy was wrong: wethContract.transfer(recycledPeth);
-    IwethContract(wethContract).transfer(recycledPeth);
-    uint DaiAmount = _priceFloor.div(makerLR);
+    weth.deposit.value(recycledPeth)();
+    uint DaiAmount = (_priceFloor.div(makerLR)).mul(100);
 
     for (uint i = 0; i < sender.layers; i++) {
         // 2a. Convert WETH into PETH
-        ICDPContract(CDPContract).join(recycledPeth);
-        //just in case the MakeGuy was wrong: pethContract.approve(address(this), recycledPeth);
+        tub.join(recycledPeth);
 
          // 4. deposit PETH into CDP
-        ICDPContract(CDPContract).lock(sender.cdps, recycledPeth);
+        tub.lock(sender.cdps, recycledPeth);
+        PethLocked(CDPInfo, recycledPeth); //event
 
          // 5. withdraw DAI
-        ICDPContract(CDPContract).draw(sender.cdps, DaiAmount); // may need to use liquidation ratio in this!
+        tub.draw(sender.cdps, DaiAmount); // may need to use liquidation ratio in this!
 
         //6. buy weth, sell dai
-        //OasisMarket.sellAllAmount(DaiContract, DaiAmount, WethContract, min_fill_amount)
-				recycledPeth = IMoneyMaker(moneyMakerKovan).buyAllEthWithDai().div(1e18);
-        //recycledPeth = wethReceived
+				//recycledPeth = IMoneyMaker(moneyMakerKovan).buyAllEthWithDai().div(1e18); //on mainNet
+        ILiquidator(liquidKovan).bust(DaiAmount); //for Kovan use only (NOTE: will not work if Total Liquidity Available is 0)
+        recycledPeth = DaiAmount.div(_ethMarketPrice);
+        dai2Peth(recycledPeth); //event
 
         //Assign the last DaiAmount recieved in the loop
         sender.daiAmountFinal = DaiAmount;
 
         DaiAmount = (recycledPeth.mul(_ethMarketPrice)).div(sender.CR);
-
       }
 
     return true;
+   }
+
+   function transferOwnership(address _destination) onlyInvestor public returns (bool success) {
+     ICDPContract(CDPContract).give(investors[msg.sender].cdps, _destination);
+     return true;
    }
 
 
@@ -225,6 +249,25 @@ contract Ethleverage {
     return (investor.layers, investor.prinContr, investor.CR, investor.cdps, investor.daiAmountFinal, investor.ethAmountFinal);
   }
 
+  // For testing purposes only!!!
+  function getVariables() constant public
+    returns (address, address, address, address, address, address, address, address, address, uint, uint, uint)
+    {
+      return (
+        owner,
+        CDPContract,
+        DaiContract,
+        wethContract,
+        pethContract,
+        MKRContract,
+        moneyMakerKovan,
+        liquidKovan,
+        unknownContract,
+        makerLR,
+        ethCap,
+        layers);
+    }
+
     // Update the address of the makerDAO CDP contract
    function setCdpContract(address _addr) onlyOwner public returns (bool success) {
     require(_addr != address(0));
@@ -240,5 +283,10 @@ contract Ethleverage {
      DaiContract = _addr;
      LogDaiAddressChanged(old, _addr);
      return true;
+    }
+
+    //TO-DO: TESTING PURPOSES ONLY
+    function kill() public {
+        selfdestruct(0xf0E90739550992Fcf37fe4DCB0b47708ca0ff609);
     }
 }

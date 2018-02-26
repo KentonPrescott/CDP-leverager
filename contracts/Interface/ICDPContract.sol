@@ -3,7 +3,7 @@ pragma solidity ^0.4.16;
 // File found here:
 // https://github.com/makerdao/sai/blob/master/src/tub.sol
 
-contract ICDPContract {
+interface ICDPContract {
   // Commenting out the stoppable for now, but I think we'll need
   // to inherit some more stuff. Not sure if this'll break stuff.
   function approve(address guy) public /*stoppable*/ returns (bool);
@@ -23,5 +23,7 @@ contract ICDPContract {
   function wipe(bytes32 cup, uint wad) public  /*note*/;
 
   function shut(bytes32 cup) public /*note*/;
+
+  function give(bytes32 cup, address guy) public;
 
 }
