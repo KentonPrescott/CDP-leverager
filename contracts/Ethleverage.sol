@@ -14,23 +14,22 @@ import "./Interface/ILiquidator.sol";
 contract Ethleverage {
   using SafeMath for uint;
 
-  //events
-
+  // Events
   event CDPOpened(bytes32 ID);
   event PethLocked(bytes32 ID, uint recycledPeth);
-  event dai2Peth(uint recycledPeth);
+  event DaiToPeth(uint recycledPeth);
 
   event LogCDPAddressChanged(address oldAddress, address newAddress);
   event LogDaiAddressChanged(address oldAddress, address newAddress);
 
-  //Variables
+  // Variables
   struct Investor {
-    uint layers;        // number of layers down
-    uint prinContr;     // principle contribution in Eth
-    uint CR;            // collatorization ratio
-    bytes32 cdps;     //array of CDPs (only one!)
-    uint daiAmountFinal;  //amount of Dai that an investor has after leveraging
-    uint ethAmountFinal; //resulting amount of ETH that an investor gets after liquidating
+    uint layers;          // Number of CDP layers
+    uint principal;       // Principal contribution in Eth
+    uint collatRatio;     // Collaterazation ratio
+    bytes32 cdpID;        // Array of cdpID (only one!)
+    uint daiAmountFinal;  // Amount of Dai that an investor has after leveraging
+    uint ethAmountFinal;  // Resulting amount of ETH that an investor gets after liquidating
   }
 
   mapping (address => Investor) public investors;
@@ -59,7 +58,7 @@ contract Ethleverage {
   }
 
   modifier onlyInvestor {
-    require(investors[msg.sender].prinContr != 0);
+    require(investors[msg.sender].principal != 0);
     _;
   }
 
@@ -128,19 +127,19 @@ contract Ethleverage {
     sender = investors[msg.sender];
     investorAddresses.push(msg.sender);
     sender.layers = layers;
-    sender.prinContr = msg.value;
-    sender.CR = calcCR;
+    sender.principal = msg.value;
+    sender.collatRatio = calcCR;
 
     //external calls
     ICDPContract tub = ICDPContract(CDPContract);
     IwethContract weth = IwethContract(wethContract);
 
     uint recycledPeth;
-    recycledPeth = sender.prinContr;
+    recycledPeth = sender.principal;
 
     // Step 3. Open CDPContract
     bytes32 CDPInfo = tub.open();
-    sender.cdps = CDPInfo;
+    sender.cdpID = CDPInfo;
     CDPOpened(CDPInfo); //event
 
     // 1. convert eth into WETH
@@ -153,29 +152,29 @@ contract Ethleverage {
         tub.join(recycledPeth);
 
          // 4. deposit PETH into CDP
-        tub.lock(sender.cdps, recycledPeth);
+        tub.lock(sender.cdpID, recycledPeth);
         PethLocked(CDPInfo, recycledPeth); //event
 
          // 5. withdraw DAI
-        tub.draw(sender.cdps, DaiAmount); // may need to use liquidation ratio in this!
+        tub.draw(sender.cdpID, DaiAmount); // may need to use liquidation ratio in this!
 
         //6. buy weth, sell dai
 				//recycledPeth = IMoneyMaker(moneyMakerKovan).buyAllEthWithDai().div(1e18); //on mainNet
         ILiquidator(liquidKovan).bust(DaiAmount); //for Kovan use only (NOTE: will not work if Total Liquidity Available is 0)
         recycledPeth = DaiAmount.div(_ethMarketPrice);
-        dai2Peth(recycledPeth); //event
+        DaiToPeth(recycledPeth); //event
 
         //Assign the last DaiAmount recieved in the loop
         sender.daiAmountFinal = DaiAmount;
 
-        DaiAmount = (recycledPeth.mul(_ethMarketPrice)).div(sender.CR);
+        DaiAmount = (recycledPeth.mul(_ethMarketPrice)).div(sender.collatRatio);
       }
 
     return true;
    }
 
    function transferOwnership(address _destination) onlyInvestor public returns (bool success) {
-     ICDPContract(CDPContract).give(investors[msg.sender].cdps, _destination);
+     ICDPContract(CDPContract).give(investors[msg.sender].cdpID, _destination);
      return true;
    }
 
@@ -191,14 +190,14 @@ contract Ethleverage {
      DaiAmount = sender.daiAmountFinal;
 
      //1. wipe off some of the the debt by paying back some of the Dai amount
-     ICDPContract(CDPContract).wipe(sender.cdps, DaiAmount);
+     ICDPContract(CDPContract).wipe(sender.cdpID, DaiAmount);
 
 
      for (uint i = 0; i < sender.layers; i++) {
 
        //2. free up some of the collatoral (PETH) because some of the debt has been wiped
-       releasedPeth = DaiAmount.mul(sender.CR);
-       ICDPContract(CDPContract).free(sender.cdps, releasedPeth);
+       releasedPeth = DaiAmount.mul(sender.collatRatio);
+       ICDPContract(CDPContract).free(sender.cdpID, releasedPeth);
 
        //3. convert PETH to WETH
        ICDPContract(CDPContract).exit(releasedPeth);
@@ -207,12 +206,12 @@ contract Ethleverage {
        DaiAmount = IMoneyMaker(moneyMakerKovan).sellAllEthForDai();
 
        //5. wipe off some of the the debt by paying back some of the Dai amount
-       ICDPContract(CDPContract).wipe(sender.cdps, DaiAmount);
+       ICDPContract(CDPContract).wipe(sender.cdpID, DaiAmount);
      }
 
      //6. take out the remaining peth
-     releasedPeth = DaiAmount.mul(sender.CR);
-     ICDPContract(CDPContract).free(sender.cdps, releasedPeth);
+     releasedPeth = DaiAmount.mul(sender.collatRatio);
+     ICDPContract(CDPContract).free(sender.cdpID, releasedPeth);
 
      //convert PETH to WETH
      ICDPContract(CDPContract).exit(releasedPeth);
@@ -220,10 +219,10 @@ contract Ethleverage {
      //convert WETH to ETH
 
      //close down the cpds
-     ICDPContract(CDPContract).shut(sender.cdps);
+     ICDPContract(CDPContract).shut(sender.cdpID);
 
      //calculate the final eth amount that is recieved from the last wipe off
-     sender.ethAmountFinal = (sender.CR).mul(DaiAmount);
+     sender.ethAmountFinal = (sender.collatRatio).mul(DaiAmount);
 
      //Send final ethAmount back to investor
      msg.sender.transfer(sender.ethAmountFinal);
@@ -238,15 +237,15 @@ contract Ethleverage {
   function getInvestor(address _addr) constant public
     returns (
       uint _layers,
-      uint prinContr,
-      uint CR,
-      bytes32 cdps,
+      uint principal,
+      uint collatRatio,
+      bytes32 cdpID,
       uint daiAmountFinal,
       uint ethAmountFinal
     )
   {
     Investor storage investor = investors[_addr];
-    return (investor.layers, investor.prinContr, investor.CR, investor.cdps, investor.daiAmountFinal, investor.ethAmountFinal);
+    return (investor.layers, investor.principal, investor.collatRatio, investor.cdpID, investor.daiAmountFinal, investor.ethAmountFinal);
   }
 
   // For testing purposes only!!!
