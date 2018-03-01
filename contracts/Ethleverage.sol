@@ -22,6 +22,25 @@ contract Ethleverage {
   event LogCDPAddressChanged(address oldAddress, address newAddress);
   event LogDaiAddressChanged(address oldAddress, address newAddress);
 
+  // External Contract Addresses
+
+  // Our contract to interact with OasisDEX
+	address public moneyMakerKovan = 0xd87856163f409777df41DDFBF37A66369E028FA9;
+
+  // MakerDAO contracts
+  // NOTE: All of these are the Kovan contract addresses
+  address public CDPContract  = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
+  address public DaiContract  = 0xC4375B7De8af5a38a93548eb8453a498222C4fF2;
+  address public wethContract = 0xd0A1E359811322d97991E03f863a0C30C2cF029C;
+  address public pethContract = 0xf4d791139cE033Ad35DB2B2201435fAd668B1b64;
+  address public MKRContract  = 0xAaF64BFCC32d0F15873a02163e7E500671a4ffcD;
+
+  // https://github.com/makerdao/sai/blob/4b0c94b8ef2d8e0951dd0a0eee7c0fce5f5dbb49/src/tap.sol
+  address public liquidKovan =  0xc936749D2D0139174EE0271bD28325074fdBC654; 
+
+  // https://kovan.etherscan.io/address/0xc936749d2d0139174ee0271bd28325074fdbc654
+  address public unknownContract = 0xc936749D2D0139174EE0271bD28325074fdBC654; 
+
   // Variables
   struct Investor {
     uint layers;          // Number of CDP layers
@@ -36,15 +55,6 @@ contract Ethleverage {
   address[] public investorAddresses;
 
   address public owner;
-
-  address public CDPContract;
-  address public DaiContract;
-  address public wethContract;
-  address public pethContract;
-  address public MKRContract;
-	address public moneyMakerKovan = 0xd87856163f409777df41DDFBF37A66369E028FA9;
-  address public liquidKovan =  0xc936749D2D0139174EE0271bD28325074fdBC654; //https://github.com/makerdao/sai/blob/4b0c94b8ef2d8e0951dd0a0eee7c0fce5f5dbb49/src/tap.sol
-  address public unknownContract = 0xc936749D2D0139174EE0271bD28325074fdBC654; //https://kovan.etherscan.io/address/0xc936749d2d0139174ee0271bd28325074fdbc654
 
   uint public makerLR;
   uint public ethCap = 10000;
@@ -63,39 +73,17 @@ contract Ethleverage {
   }
 
   //Functions
-  function Ethleverage(
-    address _CDPaddr,
-    address _Daiaddr,
-    address _wethaddr,
-    address _pethaddr,
-    address _mkrContract,
-    uint _liquidationRatio
-  ) public {
+  function Ethleverage(uint _liquidationRatio) public {
     owner = msg.sender;
-    CDPContract = _CDPaddr;
-    DaiContract = _Daiaddr;
-    wethContract = _wethaddr;
-    pethContract = _pethaddr;
-    MKRContract = _mkrContract;
     makerLR = _liquidationRatio;
   }
 
 	function initialize() public {
-      //for some reason the variables ARE initialized in the constructor function, but an error is thrown without reassigning them here.
-      owner = msg.sender;
-      moneyMakerKovan = 0xd87856163f409777df41DDFBF37A66369E028FA9;
-      liquidKovan =  0xc936749D2D0139174EE0271bD28325074fdBC654; //https://github.com/makerdao/sai/blob/4b0c94b8ef2d8e0951dd0a0eee7c0fce5f5dbb49/src/tap.sol
-      unknownContract = 0xc936749D2D0139174EE0271bD28325074fdBC654; //https://kovan.etherscan.io/address/0xc936749d2d0139174ee0271bd28325074fdbc654
+      // For some reason the variables ARE initialized in the constructor function, 
+      // but an error is thrown without reassigning them here.
       makerLR = 151;
       ethCap = 10000;
-      layers = 3;
-      DaiContract = 0xC4375B7De8af5a38a93548eb8453a498222C4fF2;
-      CDPContract = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
-      wethContract = 0xd0A1E359811322d97991E03f863a0C30C2cF029C;
-      pethContract = 0xf4d791139cE033Ad35DB2B2201435fAd668B1b64;
-      MKRContract = 0xAaF64BFCC32d0F15873a02163e7E500671a4ffcD;
 
-    
 			IwethContract(wethContract).approve(CDPContract, ethCap);
       IwethContract(wethContract).approve(unknownContract, ethCap);
 			IpethContract(pethContract).approve(CDPContract, ethCap);
