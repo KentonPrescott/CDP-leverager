@@ -72,7 +72,300 @@ class Leverager extends PureComponent {
     return twoDecimalFloat(leverage)
   }
   createPosition = () => {
-    const leveragerProxy = new web3.eth.Contract([], '0x59d7371a3026eaa3242f19b8b7ead9173a236c61')
+    const leveragerProxy = new web3.eth.Contract(
+      [
+        {
+          constant: true,
+          inputs: [],
+          name: 'currPrice',
+          outputs: [
+            {
+              name: '',
+              type: 'uint256'
+            }
+          ],
+          payable: false,
+          stateMutability: 'view',
+          type: 'function'
+        },
+        {
+          constant: true,
+          inputs: [
+            {
+              name: 'x',
+              type: 'uint256'
+            },
+            {
+              name: 'y',
+              type: 'uint256'
+            }
+          ],
+          name: 'rdiv',
+          outputs: [
+            {
+              name: 'z',
+              type: 'uint256'
+            }
+          ],
+          payable: false,
+          stateMutability: 'pure',
+          type: 'function'
+        },
+        {
+          constant: true,
+          inputs: [],
+          name: 'tub',
+          outputs: [
+            {
+              name: '',
+              type: 'address'
+            }
+          ],
+          payable: false,
+          stateMutability: 'view',
+          type: 'function'
+        },
+        {
+          constant: true,
+          inputs: [],
+          name: 'collatRatio',
+          outputs: [
+            {
+              name: '',
+              type: 'uint256'
+            }
+          ],
+          payable: false,
+          stateMutability: 'view',
+          type: 'function'
+        },
+        {
+          constant: true,
+          inputs: [],
+          name: 'weth',
+          outputs: [
+            {
+              name: '',
+              type: 'address'
+            }
+          ],
+          payable: false,
+          stateMutability: 'view',
+          type: 'function'
+        },
+        {
+          constant: true,
+          inputs: [],
+          name: 'liquidator',
+          outputs: [
+            {
+              name: '',
+              type: 'address'
+            }
+          ],
+          payable: false,
+          stateMutability: 'view',
+          type: 'function'
+        },
+        {
+          constant: true,
+          inputs: [
+            {
+              name: 'x',
+              type: 'uint256'
+            },
+            {
+              name: 'y',
+              type: 'uint256'
+            }
+          ],
+          name: 'wdiv',
+          outputs: [
+            {
+              name: 'z',
+              type: 'uint256'
+            }
+          ],
+          payable: false,
+          stateMutability: 'pure',
+          type: 'function'
+        },
+        {
+          constant: true,
+          inputs: [],
+          name: 'peth',
+          outputs: [
+            {
+              name: '',
+              type: 'address'
+            }
+          ],
+          payable: false,
+          stateMutability: 'view',
+          type: 'function'
+        },
+        {
+          constant: true,
+          inputs: [],
+          name: 'pethAmount',
+          outputs: [
+            {
+              name: '',
+              type: 'uint256'
+            }
+          ],
+          payable: false,
+          stateMutability: 'view',
+          type: 'function'
+        },
+        {
+          constant: true,
+          inputs: [],
+          name: 'inverseAsk',
+          outputs: [
+            {
+              name: '',
+              type: 'uint256'
+            }
+          ],
+          payable: false,
+          stateMutability: 'view',
+          type: 'function'
+        },
+        {
+          constant: false,
+          inputs: [
+            {
+              name: '_priceFloor',
+              type: 'uint256'
+            }
+          ],
+          name: 'openPosition',
+          outputs: [
+            {
+              name: 'cdpId',
+              type: 'bytes32'
+            }
+          ],
+          payable: true,
+          stateMutability: 'payable',
+          type: 'function'
+        },
+        {
+          constant: true,
+          inputs: [],
+          name: 'makerLR',
+          outputs: [
+            {
+              name: '',
+              type: 'uint256'
+            }
+          ],
+          payable: false,
+          stateMutability: 'view',
+          type: 'function'
+        },
+        {
+          constant: true,
+          inputs: [],
+          name: 'daiAmount',
+          outputs: [
+            {
+              name: '',
+              type: 'uint256'
+            }
+          ],
+          payable: false,
+          stateMutability: 'view',
+          type: 'function'
+        },
+        {
+          constant: true,
+          inputs: [],
+          name: 'dai',
+          outputs: [
+            {
+              name: '',
+              type: 'address'
+            }
+          ],
+          payable: false,
+          stateMutability: 'view',
+          type: 'function'
+        },
+        {
+          constant: true,
+          inputs: [],
+          name: 'tap',
+          outputs: [
+            {
+              name: '',
+              type: 'address'
+            }
+          ],
+          payable: false,
+          stateMutability: 'view',
+          type: 'function'
+        },
+        {
+          inputs: [],
+          payable: false,
+          stateMutability: 'nonpayable',
+          type: 'constructor'
+        },
+        {
+          anonymous: false,
+          inputs: [
+            {
+              indexed: false,
+              name: 'caller',
+              type: 'address'
+            },
+            {
+              indexed: false,
+              name: 'ethAmount',
+              type: 'uint256'
+            },
+            {
+              indexed: false,
+              name: 'daiAmount',
+              type: 'uint256'
+            },
+            {
+              indexed: false,
+              name: 'pethAmount',
+              type: 'uint256'
+            }
+          ],
+          name: 'MakeDai',
+          type: 'event'
+        },
+        {
+          constant: true,
+          inputs: [],
+          name: 'pip',
+          outputs: [
+            {
+              name: '',
+              type: 'address'
+            }
+          ],
+          payable: false,
+          stateMutability: 'view',
+          type: 'function'
+        }
+      ],
+      '0x59d7371a3026eaa3242f19b8b7ead9173a236c61'
+    )
+    web3.eth.getAccounts((e, r) => {
+      const addrs = r[0]
+      leveragerProxy.methods
+        .openPosition(500000000000000000000)
+        .send({ from: r[0], gas: 1000000, value: 100000000000000000 })
+        .then(function (receipt) {
+          console.log(receipt)
+        })
+    })
     // leveragerProxy.methods
     //   .leverage(x, x)
     //   .estimateGas({}, function(error, gasAmount) {
