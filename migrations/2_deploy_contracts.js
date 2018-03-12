@@ -8,13 +8,13 @@ const kovanMKR = 0xAaF64BFCC32d0F15873a02163e7E500671a4ffcD;
 
 const wethContract = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 const pethContract = 0xf53AD2c6851052A81B42133467480961B2321C09;
-const LiquidationRatio = 150; //possibly 1.6 to account for governance fee
+const liqRatio = 150; //possibly 1.6 to account for governance fee
 //need to add more here
 
 module.exports = function(deployer, network, accounts) {
 
     if (network == "kovan") {
-      deployer.deploy(Ethleverage, kovanTub, kovanSai, kovanWeth, kovanPeth, kovanMKR, LiquidationRatio);
+      deployer.deploy(Ethleverage, liqRatio);
     }
     else {
     }

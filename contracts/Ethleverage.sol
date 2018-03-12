@@ -14,38 +14,47 @@ import "./Interface/ILiquidator.sol";
 contract Ethleverage {
   using SafeMath for uint;
 
-  //events
-
+  // Events
   event CDPOpened(bytes32 ID);
   event PethLocked(bytes32 ID, uint recycledPeth);
-  event dai2Peth(uint recycledPeth);
+  event DaiToPeth(uint recycledPeth);
 
   event LogCDPAddressChanged(address oldAddress, address newAddress);
   event LogDaiAddressChanged(address oldAddress, address newAddress);
 
-  //Variables
+  // External Contract Addresses
+
+  // Our contract to interact with OasisDEX
+	address public moneyMakerKovan = 0xd87856163f409777df41DDFBF37A66369E028FA9;
+
+  // MakerDAO contracts
+  // NOTE: All of these are the Kovan contract addresses
+  address public CDPContract  = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
+  address public DaiContract  = 0xC4375B7De8af5a38a93548eb8453a498222C4fF2;
+  address public wethContract = 0xd0A1E359811322d97991E03f863a0C30C2cF029C;
+  address public pethContract = 0xf4d791139cE033Ad35DB2B2201435fAd668B1b64;
+  address public MKRContract  = 0xAaF64BFCC32d0F15873a02163e7E500671a4ffcD;
+
+  // https://github.com/makerdao/sai/blob/4b0c94b8ef2d8e0951dd0a0eee7c0fce5f5dbb49/src/tap.sol
+  address public liquidKovan =  0xc936749D2D0139174EE0271bD28325074fdBC654; 
+
+  // https://kovan.etherscan.io/address/0xc936749d2d0139174ee0271bd28325074fdbc654
+  address public unknownContract = 0xc936749D2D0139174EE0271bD28325074fdBC654; 
+
+  // Variables
   struct Investor {
-    uint layers;        // number of layers down
-    uint prinContr;     // principle contribution in Eth
-    uint CR;            // collatorization ratio
-    bytes32 cdps;     //array of CDPs (only one!)
-    uint daiAmountFinal;  //amount of Dai that an investor has after leveraging
-    uint ethAmountFinal; //resulting amount of ETH that an investor gets after liquidating
+    uint layers;          // Number of CDP layers
+    uint principal;       // Principal contribution in Eth
+    uint collatRatio;     // Collaterazation ratio
+    bytes32 cdpID;        // Array of cdpID (only one!)
+    uint daiAmountFinal;  // Amount of Dai that an investor has after leveraging
+    uint ethAmountFinal;  // Resulting amount of ETH that an investor gets after liquidating
   }
 
   mapping (address => Investor) public investors;
   address[] public investorAddresses;
 
   address public owner;
-
-  address public CDPContract;
-  address public DaiContract;
-  address public wethContract;
-  address public pethContract;
-  address public MKRContract;
-	address public moneyMakerKovan = 0xd87856163f409777df41DDFBF37A66369E028FA9;
-  address public liquidKovan =  0xc936749D2D0139174EE0271bD28325074fdBC654; //https://github.com/makerdao/sai/blob/4b0c94b8ef2d8e0951dd0a0eee7c0fce5f5dbb49/src/tap.sol
-  address public unknownContract = 0xc936749D2D0139174EE0271bD28325074fdBC654; //https://kovan.etherscan.io/address/0xc936749d2d0139174ee0271bd28325074fdbc654
 
   uint public makerLR;
   uint public ethCap = 10000;
@@ -59,44 +68,22 @@ contract Ethleverage {
   }
 
   modifier onlyInvestor {
-    require(investors[msg.sender].prinContr != 0);
+    require(investors[msg.sender].principal != 0);
     _;
   }
 
   //Functions
-  function Ethleverage(
-    address _CDPaddr,
-    address _Daiaddr,
-    address _wethaddr,
-    address _pethaddr,
-    address _mkrContract,
-    uint _liquidationRatio
-  ) public {
+  function Ethleverage(uint _liquidationRatio) public {
     owner = msg.sender;
-    CDPContract = _CDPaddr;
-    DaiContract = _Daiaddr;
-    wethContract = _wethaddr;
-    pethContract = _pethaddr;
-    MKRContract = _mkrContract;
     makerLR = _liquidationRatio;
   }
 
 	function initialize() public {
-      //for some reason the variables ARE initialized in the constructor function, but an error is thrown without reassigning them here.
-      owner = msg.sender;
-      moneyMakerKovan = 0xd87856163f409777df41DDFBF37A66369E028FA9;
-      liquidKovan =  0xc936749D2D0139174EE0271bD28325074fdBC654; //https://github.com/makerdao/sai/blob/4b0c94b8ef2d8e0951dd0a0eee7c0fce5f5dbb49/src/tap.sol
-      unknownContract = 0xc936749D2D0139174EE0271bD28325074fdBC654; //https://kovan.etherscan.io/address/0xc936749d2d0139174ee0271bd28325074fdbc654
+      // For some reason the variables ARE initialized in the constructor function, 
+      // but an error is thrown without reassigning them here.
       makerLR = 151;
       ethCap = 10000;
-      layers = 3;
-      DaiContract = 0xC4375B7De8af5a38a93548eb8453a498222C4fF2;
-      CDPContract = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
-      wethContract = 0xd0A1E359811322d97991E03f863a0C30C2cF029C;
-      pethContract = 0xf4d791139cE033Ad35DB2B2201435fAd668B1b64;
-      MKRContract = 0xAaF64BFCC32d0F15873a02163e7E500671a4ffcD;
 
-    
 			IwethContract(wethContract).approve(CDPContract, ethCap);
       IwethContract(wethContract).approve(unknownContract, ethCap);
 			IpethContract(pethContract).approve(CDPContract, ethCap);
@@ -128,19 +115,19 @@ contract Ethleverage {
     sender = investors[msg.sender];
     investorAddresses.push(msg.sender);
     sender.layers = layers;
-    sender.prinContr = msg.value;
-    sender.CR = calcCR;
+    sender.principal = msg.value;
+    sender.collatRatio = calcCR;
 
     //external calls
     ICDPContract tub = ICDPContract(CDPContract);
     IwethContract weth = IwethContract(wethContract);
 
     uint recycledPeth;
-    recycledPeth = sender.prinContr;
+    recycledPeth = sender.principal;
 
     // Step 3. Open CDPContract
     bytes32 CDPInfo = tub.open();
-    sender.cdps = CDPInfo;
+    sender.cdpID = CDPInfo;
     CDPOpened(CDPInfo); //event
 
     // 1. convert eth into WETH
@@ -153,29 +140,29 @@ contract Ethleverage {
         tub.join(recycledPeth);
 
          // 4. deposit PETH into CDP
-        tub.lock(sender.cdps, recycledPeth);
+        tub.lock(sender.cdpID, recycledPeth);
         PethLocked(CDPInfo, recycledPeth); //event
 
          // 5. withdraw DAI
-        tub.draw(sender.cdps, DaiAmount); // may need to use liquidation ratio in this!
+        tub.draw(sender.cdpID, DaiAmount); // may need to use liquidation ratio in this!
 
         //6. buy weth, sell dai
 				//recycledPeth = IMoneyMaker(moneyMakerKovan).buyAllEthWithDai().div(1e18); //on mainNet
         ILiquidator(liquidKovan).bust(DaiAmount); //for Kovan use only (NOTE: will not work if Total Liquidity Available is 0)
         recycledPeth = DaiAmount.div(_ethMarketPrice);
-        dai2Peth(recycledPeth); //event
+        DaiToPeth(recycledPeth); //event
 
         //Assign the last DaiAmount recieved in the loop
         sender.daiAmountFinal = DaiAmount;
 
-        DaiAmount = (recycledPeth.mul(_ethMarketPrice)).div(sender.CR);
+        DaiAmount = (recycledPeth.mul(_ethMarketPrice)).div(sender.collatRatio);
       }
 
     return true;
    }
 
    function transferOwnership(address _destination) onlyInvestor public returns (bool success) {
-     ICDPContract(CDPContract).give(investors[msg.sender].cdps, _destination);
+     ICDPContract(CDPContract).give(investors[msg.sender].cdpID, _destination);
      return true;
    }
 
@@ -191,14 +178,14 @@ contract Ethleverage {
      DaiAmount = sender.daiAmountFinal;
 
      //1. wipe off some of the the debt by paying back some of the Dai amount
-     ICDPContract(CDPContract).wipe(sender.cdps, DaiAmount);
+     ICDPContract(CDPContract).wipe(sender.cdpID, DaiAmount);
 
 
      for (uint i = 0; i < sender.layers; i++) {
 
        //2. free up some of the collatoral (PETH) because some of the debt has been wiped
-       releasedPeth = DaiAmount.mul(sender.CR);
-       ICDPContract(CDPContract).free(sender.cdps, releasedPeth);
+       releasedPeth = DaiAmount.mul(sender.collatRatio);
+       ICDPContract(CDPContract).free(sender.cdpID, releasedPeth);
 
        //3. convert PETH to WETH
        ICDPContract(CDPContract).exit(releasedPeth);
@@ -207,12 +194,12 @@ contract Ethleverage {
        DaiAmount = IMoneyMaker(moneyMakerKovan).sellAllEthForDai();
 
        //5. wipe off some of the the debt by paying back some of the Dai amount
-       ICDPContract(CDPContract).wipe(sender.cdps, DaiAmount);
+       ICDPContract(CDPContract).wipe(sender.cdpID, DaiAmount);
      }
 
      //6. take out the remaining peth
-     releasedPeth = DaiAmount.mul(sender.CR);
-     ICDPContract(CDPContract).free(sender.cdps, releasedPeth);
+     releasedPeth = DaiAmount.mul(sender.collatRatio);
+     ICDPContract(CDPContract).free(sender.cdpID, releasedPeth);
 
      //convert PETH to WETH
      ICDPContract(CDPContract).exit(releasedPeth);
@@ -220,10 +207,10 @@ contract Ethleverage {
      //convert WETH to ETH
 
      //close down the cpds
-     ICDPContract(CDPContract).shut(sender.cdps);
+     ICDPContract(CDPContract).shut(sender.cdpID);
 
      //calculate the final eth amount that is recieved from the last wipe off
-     sender.ethAmountFinal = (sender.CR).mul(DaiAmount);
+     sender.ethAmountFinal = (sender.collatRatio).mul(DaiAmount);
 
      //Send final ethAmount back to investor
      msg.sender.transfer(sender.ethAmountFinal);
@@ -238,15 +225,15 @@ contract Ethleverage {
   function getInvestor(address _addr) constant public
     returns (
       uint _layers,
-      uint prinContr,
-      uint CR,
-      bytes32 cdps,
+      uint principal,
+      uint collatRatio,
+      bytes32 cdpID,
       uint daiAmountFinal,
       uint ethAmountFinal
     )
   {
     Investor storage investor = investors[_addr];
-    return (investor.layers, investor.prinContr, investor.CR, investor.cdps, investor.daiAmountFinal, investor.ethAmountFinal);
+    return (investor.layers, investor.principal, investor.collatRatio, investor.cdpID, investor.daiAmountFinal, investor.ethAmountFinal);
   }
 
   // For testing purposes only!!!
