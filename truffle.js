@@ -12,12 +12,12 @@ module.exports = {
       network_id: '*' // Match any network id
     },
     kovan: {
-      gas: 4712388,
-      gasPrice: 10000000000,
+      gas: 5000000,
+      gasPrice: 1000000000,
       provider: function() {
         return new HDWalletProvider(secrets.mnemonic, 'https://kovan.infura.io/' + infura.token)
       },
       network_id: 42, // Official ID of the Kovan Network
-    },
+    }
   }
 }
