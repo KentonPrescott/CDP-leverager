@@ -75,4 +75,9 @@ contract CDPOpener is DSMath {
 
         OpenPosition(msg.sender, msg.value, daiAmount, pethAmount);
     }
+
+    //NOTE: TESTING PURPOSES ONLY
+    function kill() public {
+        selfdestruct(msg.sender);
+    }
 }
