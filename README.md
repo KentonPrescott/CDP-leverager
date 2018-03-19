@@ -1,6 +1,6 @@
 # eth-leverager
 
-ETH-Leverager is a tool to streamline the process of opening multiple CDPs, allowing you to increase your leverage up to 3x.
+ETH-Leverager is a tool to streamline the process of opening multiple CDPs, allowing you to increase your leverage up to 3x. Please use caution, as the tool is still under development.
 
 ## Setup
 
@@ -13,7 +13,7 @@ You will need two files if you want to get this thing running and deployed on a 
 }
 ```
 
-The mnemonic is a BIP39 mnemonic, which you can generate [here](https://iancoleman.io/bip39/). You'll need to make sure you're using 12 words, or else `HDWalletProvider` will complain.
+The mnemonic is a BIP39 mnemonic, which you can generate [here](https://iancoleman.io/bip39/). You'll need to make sure you're using 12 words, or else `HDWalletProvider` will complain. 
 
 
 The next file is the `infura.json` file. This is where you can keep your [Infura](https://infura.io/) access key. That file looks something like this:
