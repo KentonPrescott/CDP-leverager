@@ -4,6 +4,7 @@ import "./interfaces/ITub.sol";
 import "./interfaces/ERC20.sol";
 import "./interfaces/DSValue.sol";
 import "./interfaces/IWETH.sol";
+import "./interfaces/ILiquidator.sol";
 import "./DSMath.sol";
 
 contract CDPOpener is DSMath {
@@ -13,6 +14,7 @@ contract CDPOpener is DSMath {
     ERC20 public dai;
     DSValue public pip;
     uint256 public makerLR;
+    ILiquidator public tap;
 
     event OpenPosition(address owner, uint256 ethAmount, uint256 daiAmount, uint256 pethAmount);
 
@@ -24,10 +26,13 @@ contract CDPOpener is DSMath {
       peth = tub.skr();
       dai = tub.sai();
       pip = tub.pip();
+      tap = tub.tap();
+
       makerLR = 151;
       // we approve 100,000 weth/ peth
       weth.approve(tub, 100000000000000000000000);
       peth.approve(tub, 100000000000000000000000);
+      peth.approve(tap, 100000000000000000000000);
     }
 
     /* openPosition will:
@@ -70,11 +75,21 @@ contract CDPOpener is DSMath {
         tub.lock(cdpId, pethAmount);               // lock peth into cdp
         tub.draw(cdpId, daiAmount);                // create dai from cdp
 
+        //trade dai for peth and reinvest into cdp
+        tap.bust(wdiv(daiAmount,currPrice));       // convert dai to peth by buying peth from forced cdps
+        pethAmount = peth.balanceOf(this);         // retrieve peth balance
+        tub.lock(cdpId, pethAmount);               // lock peth balance into cdp
+        inverseAsk = rdiv(pethAmount, wmul(tub.gap(), tub.per())) - 1;
+        daiAmount = wdiv(wmul(currPrice, inverseAsk), collatRatio);
+
+        tub.draw(cdpId, daiAmount);                // create dai from cdp
+
         dai.transfer(msg.sender, daiAmount);         // transfer dai to owner
         tub.give(cdpId, msg.sender);                 // transfer cdp to owner
 
         OpenPosition(msg.sender, msg.value, daiAmount, pethAmount);
     }
+
 
     //NOTE: TESTING PURPOSES ONLY
     function kill() public {
