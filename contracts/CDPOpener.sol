@@ -9,9 +9,9 @@ import "./DSMath.sol";
 
 contract CDPOpener is DSMath {
     ITub public tub;
-    ERC20 public weth;
-    ERC20 public peth;
-    ERC20 public dai;
+    DSToken public weth;
+    DSToken public peth;
+    DSToken public dai;
     DSValue public pip;
     uint256 public makerLR;
     ILiquidator public tap;

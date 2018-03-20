@@ -2,12 +2,13 @@ pragma solidity ^0.4.16;
 
 import "./ERC20.sol";
 import "./DSValue.sol";
+import "./DSToken.sol";
 import "./ILiquidator.sol";
 
 interface ITub {
-    function sai() public view returns (ERC20);
-    function skr() public view returns (ERC20);
-    function gem() public view returns (ERC20);
+    function sai() public view returns (DSToken);
+    function skr() public view returns (DSToken);
+    function gem() public view returns (DSToken);
     function pip() public view returns (DSValue);
     function tap() public view returns (ILiquidator);
 
