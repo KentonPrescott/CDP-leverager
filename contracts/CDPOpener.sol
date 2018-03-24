@@ -4,15 +4,18 @@ import "./interfaces/ITub.sol";
 import "./interfaces/ERC20.sol";
 import "./interfaces/DSValue.sol";
 import "./interfaces/IWETH.sol";
+import "./interfaces/ILiquidator.sol";
 import "./DSMath.sol";
 
 contract CDPOpener is DSMath {
     ITub public tub;
-    ERC20 public weth;
-    ERC20 public peth;
-    ERC20 public dai;
+    DSToken public weth;
+    DSToken public peth;
+    DSToken public dai;
     DSValue public pip;
     uint256 public makerLR;
+    uint256 public layers;
+    ILiquidator public tap;
 
     event OpenPosition(address owner, uint256 ethAmount, uint256 daiAmount, uint256 pethAmount);
 
@@ -24,10 +27,16 @@ contract CDPOpener is DSMath {
       peth = tub.skr();
       dai = tub.sai();
       pip = tub.pip();
+      tap = tub.tap();
+
       makerLR = 151;
-      // we approve 100,000 weth/ peth
+      layers = 3;
+
+      // we approve tub and tap to access weth, peth, and dai contracts
       weth.approve(tub, 100000000000000000000000);
       peth.approve(tub, 100000000000000000000000);
+      peth.approve(tap, 100000000000000000000000);
+      dai.approve(tap, 100000000000000000000000);
     }
 
     /* openPosition will:
@@ -39,8 +48,12 @@ contract CDPOpener is DSMath {
        6. Open a CDP
        7. Lock up all of our created peth
        8. Draw the amount dai calculated above
-       9. Give the dai to the caller of this function
-       10. Give the CDP to the caller of this function
+       9. Exchange dai for peth
+       10. Repeat steps 7-9 for # of (layers-1) prescribed
+       11. Lock up all of our created peth
+       12. Draw the amount dai
+       13. Give the dai to the caller of this function
+       14. Give the CDP to the caller of this function
        NOTE 406376 gas used in this functino in my first test
      */
     function openPosition(uint256 _priceFloor) payable public returns (bytes32 cdpId) {
@@ -55,26 +68,37 @@ contract CDPOpener is DSMath {
         // calculate collateralization ratio from price floor
         uint256 collatRatio = wdiv(wmul(currPrice, makerLR), wmul(_priceFloor, 100));
 
-        IWETH(weth).deposit.value(msg.value)();      // wrap eth in weth token
+        IWETH(weth).deposit.value(msg.value)();       // wrap eth in weth token
 
         // calculate how much peth we need to enter with
         uint256 inverseAsk = rdiv(msg.value, wmul(tub.gap(), tub.per())) - 1;
 
-        tub.join(inverseAsk);                      // convert weth to peth
-        uint256 pethAmount = peth.balanceOf(this); // get the amt peth we created
+        tub.join(inverseAsk);                        // convert weth to peth
+        uint256 pethAmount = peth.balanceOf(this);   // get the amt peth we created
 
         // calculate dai we need to draw in order to create the collat ratio we want
         uint256 daiAmount = wdiv(wmul(currPrice, inverseAsk), collatRatio);
 
-        cdpId = tub.open();                        // create cdp in tub
-        tub.lock(cdpId, pethAmount);               // lock peth into cdp
-        tub.draw(cdpId, daiAmount);                // create dai from cdp
+        cdpId = tub.open();                          // create cdp in tub
+        tub.lock(cdpId, pethAmount);                 // lock peth into cdp
+        tub.draw(cdpId, daiAmount);                  // create dai from cdp
+
+        //trade dai for peth and reinvest into cdp for # of layers
+        for (uint256 i = 0; i < layers; i++) {
+          tap.bust(wdiv(daiAmount,currPrice));       // convert dai to peth by buying peth from forced cdps
+          pethAmount = peth.balanceOf(this);         // retrieve peth balance
+          tub.lock(cdpId, pethAmount);               // lock peth balance into cdp
+          inverseAsk = rdiv(pethAmount, wmul(tub.gap(), tub.per())) - 1;  // look at declaration
+          daiAmount = wdiv(wmul(currPrice, inverseAsk), collatRatio);     // look at declaration
+          tub.draw(cdpId, daiAmount);                // create dai from cdp
+        }
 
         dai.transfer(msg.sender, daiAmount);         // transfer dai to owner
         tub.give(cdpId, msg.sender);                 // transfer cdp to owner
 
         OpenPosition(msg.sender, msg.value, daiAmount, pethAmount);
     }
+
 
     //NOTE: TESTING PURPOSES ONLY
     function kill() public {
