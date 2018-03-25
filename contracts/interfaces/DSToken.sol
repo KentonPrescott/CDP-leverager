@@ -1,7 +1,7 @@
 pragma solidity ^0.4.16;
 
 
-interface DSToken{
+interface DSToken {
     function push(address dst, uint wad) public;
     function pull(address src, uint wad) public;
 

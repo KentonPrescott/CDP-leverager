@@ -4,7 +4,7 @@ import "./interfaces/ITub.sol";
 import "./interfaces/ERC20.sol";
 import "./interfaces/DSValue.sol";
 import "./interfaces/IWETH.sol";
-import "./interfaces/ILiquidator.sol";
+import "./interfaces/IMatchingMarket.sol";
 import "./DSMath.sol";
 
 contract CDPOpener is DSMath {
@@ -16,27 +16,32 @@ contract CDPOpener is DSMath {
     uint256 public makerLR;
     uint256 public layers;
     ILiquidator public tap;
+    IMatchingMarket public dex;
 
     event OpenPosition(address owner, uint256 ethAmount, uint256 daiAmount, uint256 pethAmount);
 
     function CDPOpener() public {
       // this should be passed into constructor but that never seems to work ¯\_(ツ)_/¯
       address _tub = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
+      address _oasisDex = 0x8cf1Cab422A0b6b554077A361f8419cDf122a9F9;
       tub = ITub(_tub);
       weth = tub.gem();
       peth = tub.skr();
       dai = tub.sai();
       pip = tub.pip();
       tap = tub.tap();
+      dex = IMatchingMarket(_oasisDex);
 
       makerLR = 151;
       layers = 3;
 
-      // we approve tub and tap to access weth, peth, and dai contracts
+      // we approve tub, tap, and dex to access weth, peth, and dai contracts
       weth.approve(tub, 100000000000000000000000);
+      weth.approve(dex, 100000000000000000000000);
       peth.approve(tub, 100000000000000000000000);
       peth.approve(tap, 100000000000000000000000);
       dai.approve(tap, 100000000000000000000000);
+      dai.approve(dex, 100000000000000000000000);
     }
 
     /* openPosition will:
@@ -83,12 +88,20 @@ contract CDPOpener is DSMath {
         tub.lock(cdpId, pethAmount);                 // lock peth into cdp
         tub.draw(cdpId, daiAmount);                  // create dai from cdp
 
+        uint256 wethAmount;                          // initialize weth variable before loop
         //trade dai for peth and reinvest into cdp for # of layers
         for (uint256 i = 0; i < layers; i++) {
-          tap.bust(wdiv(daiAmount,currPrice));       // convert dai to peth by buying peth from forced cdps
+
+          //tap.bust(wdiv(daiAmount,currPrice));       // Liquidator: convert dai to peth by buying peth from forced cdps
+          wethAmount = wdiv(daiAmount,currPrice);    // calculate how much weth to get at market rate
+          dex.buyAllAmount(weth, wethAmount, dai, daiAmount); //OasisDEX: buy as much weth as possible.
+
+          inverseAsk = rdiv(wethAmount, wmul(tub.gap(), tub.per())) - 1;  // look at declaration
+          tub.join(inverseAsk);            // convert all weth to peth
+
           pethAmount = peth.balanceOf(this);         // retrieve peth balance
           tub.lock(cdpId, pethAmount);               // lock peth balance into cdp
-          inverseAsk = rdiv(pethAmount, wmul(tub.gap(), tub.per())) - 1;  // look at declaration
+
           daiAmount = wdiv(wmul(currPrice, inverseAsk), collatRatio);     // look at declaration
           tub.draw(cdpId, daiAmount);                // create dai from cdp
         }
@@ -98,6 +111,8 @@ contract CDPOpener is DSMath {
 
         OpenPosition(msg.sender, msg.value, daiAmount, pethAmount);
     }
+
+
 
 
     //NOTE: TESTING PURPOSES ONLY

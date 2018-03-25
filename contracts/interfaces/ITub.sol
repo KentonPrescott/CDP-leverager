@@ -22,6 +22,7 @@ interface ITub {
     function bid(uint wad) public view returns (uint);
 
     function join(uint wad) public;
+    function exit(uint wad) public;
     function lock(bytes32 cup, uint wad) public;
     function free(bytes32 cup, uint wad) public;
     function draw(bytes32 cup, uint wad) public;
