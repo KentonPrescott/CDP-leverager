@@ -18,6 +18,19 @@ contract CDPOpener is DSMath {
     ILiquidator public tap;
     IMatchingMarket public dex;
 
+    struct Investor {
+        uint layers;          // Number of CDP layers
+        uint principal;       // Principal contribution in Eth
+        uint256 collatRatio;     // Collaterazation ratio
+        bytes32 cdpID;        // Array of cdpID
+        uint daiAmountFinal;  // Amount of Dai that an investor has after leveraging
+        uint ethAmountFinal;  // Resulting amount of ETH that an investor gets after liquidating
+      }
+
+    mapping (address => Investor) public investors;
+    address[] public investorAddresses;
+
+
     event OpenPosition(address owner, uint256 ethAmount, uint256 daiAmount, uint256 pethAmount);
 
     function CDPOpener() public {
@@ -61,7 +74,7 @@ contract CDPOpener is DSMath {
        14. Give the CDP to the caller of this function
        NOTE 406376 gas used in this functino in my first test
      */
-    function openPosition(uint256 _priceFloor) payable public returns (bytes32 cdpId) {
+    function openPosition(uint256 _priceFloor) payable public {
 
         // 1000000000000000000 WAD = 1 normal unit (eg 1 dollar or 1 eth)
 
@@ -72,6 +85,13 @@ contract CDPOpener is DSMath {
 
         // calculate collateralization ratio from price floor
         uint256 collatRatio = wdiv(wmul(currPrice, makerLR), wmul(_priceFloor, 100));
+
+        //Add information about investor to database
+        Investor memory sender;
+        investorAddresses.push(msg.sender);
+        sender.layers = layers;
+        sender.principal = msg.value;
+        sender.collatRatio = collatRatio;
 
         IWETH(weth).deposit.value(msg.value)();       // wrap eth in weth token
 
@@ -84,9 +104,9 @@ contract CDPOpener is DSMath {
         // calculate dai we need to draw in order to create the collat ratio we want
         uint256 daiAmount = wdiv(wmul(currPrice, inverseAsk), collatRatio);
 
-        cdpId = tub.open();                          // create cdp in tub
-        tub.lock(cdpId, pethAmount);                 // lock peth into cdp
-        tub.draw(cdpId, daiAmount);                  // create dai from cdp
+        sender.cdpID = tub.open();                // create cdp in tub
+        tub.lock(sender.cdpID, pethAmount);                 // lock peth into cdp
+        tub.draw(sender.cdpID, daiAmount);                  // create dai from cdp
 
         uint256 wethAmount;                          // initialize weth variable before loop
         //trade dai for peth and reinvest into cdp for # of layers
@@ -100,20 +120,38 @@ contract CDPOpener is DSMath {
           tub.join(inverseAsk);            // convert all weth to peth
 
           pethAmount = peth.balanceOf(this);         // retrieve peth balance
-          tub.lock(cdpId, pethAmount);               // lock peth balance into cdp
+          tub.lock(sender.cdpID, pethAmount);               // lock peth balance into cdp
 
           daiAmount = wdiv(wmul(currPrice, inverseAsk), collatRatio);     // look at declaration
-          tub.draw(cdpId, daiAmount);                // create dai from cdp
+          tub.draw(sender.cdpID, daiAmount);                // create dai from cdp
         }
 
         dai.transfer(msg.sender, daiAmount);         // transfer dai to owner
-        tub.give(cdpId, msg.sender);                 // transfer cdp to owner
+        tub.give(sender.cdpID, msg.sender);                 // transfer cdp to owner
+
+        sender.daiAmountFinal = daiAmount;           //record how much dai is required to back out position
+
+        investors[msg.sender] = sender;
 
         OpenPosition(msg.sender, msg.value, daiAmount, pethAmount);
     }
 
 
-
+    // Returns the variables contained in the Investor struct for a given address
+   function getInvestorS(address _addr) public constant
+     returns (
+       uint _layers,
+       uint principal,
+       uint collatRatio,
+       bytes32 cdpID,
+       uint daiAmountFinal,
+       uint ethAmountFinal
+     )
+   {
+     Investor storage investor;
+     investor = investors[_addr];
+     return (investor.layers, investor.principal, investor.collatRatio, investor.cdpID, investor.daiAmountFinal, investor.ethAmountFinal);
+   }
 
     //NOTE: TESTING PURPOSES ONLY
     function kill() public {
