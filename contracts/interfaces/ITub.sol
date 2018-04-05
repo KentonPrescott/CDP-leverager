@@ -10,7 +10,13 @@ interface ITub {
     function skr() public view returns (DSToken);
     function gem() public view returns (DSToken);
     function pip() public view returns (DSValue);
+    function pep() public view returns (DSValue);
+    function gov() public view returns (DSToken);
+    function fee() public view returns (uint256);
     function tap() public view returns (ILiquidator);
+
+    function ink(bytes32 cup) public view returns (uint);
+    function rap(bytes32 cup) public returns (uint);
 
     function open() public returns (bytes32 cup);
     function give(bytes32 cup, address guy) public;
@@ -26,5 +32,7 @@ interface ITub {
     function lock(bytes32 cup, uint wad) public;
     function free(bytes32 cup, uint wad) public;
     function draw(bytes32 cup, uint wad) public;
+    function wipe(bytes32 cup, uint wad) public;
     function cage(uint fit_, uint jam) public;
+    function shut(bytes32 cup) public;
 }
