@@ -13,6 +13,8 @@ interface ITub {
     function pep() public view returns (DSValue);
     function gov() public view returns (DSToken);
     function fee() public view returns (uint256);
+    function tax() public view returns (uint256);
+    function axe() public view returns (uint256);
     function tap() public view returns (ILiquidator);
 
     function ink(bytes32 cup) public view returns (uint);

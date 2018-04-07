@@ -20,6 +20,8 @@ contract CDPOpener is DSMath {
     uint256 public fee;
     ILiquidator public tap;
     IMatchingMarket public dex;
+    uint constant WAD = 10 ** 18;
+    uint constant RAY = 10 ** 27;
 
     struct Investor {
         uint256 layers;          // Number of CDP layers. According to github schematic
@@ -29,14 +31,18 @@ contract CDPOpener is DSMath {
         uint256 purchPrice;      // currPrice at time of purchase
         uint256 daiAmountFinal;  // Amount of Dai that an investor has after leveraging
         uint256 ethAmountFinal;  // Resulting amount of ETH that an investor gets after liquidating
-        uint256 totalDebt;       //total amount of debt (dai)
+        uint256 totalDebt;       // total amount of debt (dai)
+        uint256 priceFloor;      // price floor
+        uint256 now;             // created now
+        uint256 index;           // index of investor
     }
 
     mapping (address => Investor) public investors;
     address[] public investorAddresses;
 
     modifier onlyInvestor {
-      require(investors[msg.sender].principal != 0);
+      require(investorAddresses.length != 0);
+      require(investorAddresses[investors[msg.sender].index] == msg.sender);
       _;
     }
 
@@ -55,10 +61,12 @@ contract CDPOpener is DSMath {
       pep = tub.pep();
       tap = tub.tap();
       gov = tub.gov();
-      fee = tub.fee();
+      fee = tub.fee(); // MKR fee in RAY; To-Do: need to capture fee on time of leverage/liquidate
+      tax = tub.tax(); // Stability fee in RAY
+      axe = tub.axe(); // Liquidation penalty in RAY
       dex = IMatchingMarket(_oasisDex);
 
-      makerLR = 151;
+      makerLR = 150; // changed from 151 to 150 to help with liquidation logic
       layers = 3;
 
       // we approve tub, tap, and dex to access weth, peth, and dai contracts
@@ -105,21 +113,25 @@ contract CDPOpener is DSMath {
 
         //Add information about investor to database
         Investor memory sender;
-        investorAddresses.push(msg.sender);
+        sender.index = investorAddresses.push(msg.sender) - 1;
         sender.layers = layers;
-        sender.principal = msg.value;
         sender.collatRatio = collatRatio;
         sender.purchPrice = currPrice;
+        sender.priceFloor = _priceFloor;
+        sender.created = now;
 
         IWETH(weth).deposit.value(msg.value)();       // wrap eth in weth token
-        // calculating mkrAmount was troublesome uint256 mkrAmount = wdiv(wmul(wmul(add(wdiv(sender.principal,2),add(wdiv(sender.principal,4),wdiv(sender.principal,8))),currPrice),fee),currPriceMKR);
-        uint256 mkrAmount = 340400000000000;
+        // calculating mkrAmount was troublesome :( uint256 mkrAmount = wdiv(wmul(wmul(add(wdiv(sender.principal,2),add(wdiv(sender.principal,4),wdiv(sender.principal,8))),currPrice),fee),currPriceMKR);
+        uint256 mkrAmount = 340400000000000; // need to fix so about equation is correct and variable; note that sender.principal is assigned below this line
         uint256 wethAmount = wmul(mkrAmount,wdiv(currPriceMKR,currPrice));
 
         dex.buyAllAmount(gov, mkrAmount, weth, wethAmount); //OasisDEX: buy mkr with weth
 
         // calculate how much peth we need to enter with
         uint256 inverseAsk = rdiv(sub(msg.value, wethAmount), wmul(tub.gap(), tub.per())) - 1;
+
+        //record the principal minus fees used to purchase mkr
+        sender.principal = sub(msg.value, wethAmount);
 
         tub.join(inverseAsk);                        // convert weth to peth
         uint256 pethAmount = peth.balanceOf(this);   // get the amt peth we created
@@ -171,40 +183,97 @@ contract CDPOpener is DSMath {
         uint256 wethAmount;
         uint256 daiAmount = sender.daiAmountFinal;
 
-        tub.wipe(sender.cdpID, daiAmount);           //wipe off some debt by paying back some of the Dai Amount
-        releasedPeth = wdiv(wmul(daiAmount,sender.collatRatio),sender.purchPrice);  // release the initial ammount of PETH
-        // inverseAsk = rdiv(msg.value, wmul(tub.gap(), tub.per())) - 1;
+        if (sender.priceFloor > currPrice){
+            //*** CDP is auto-liquidated  ***//
 
-        tub.free(sender.cdpID, releasedPeth);  //release peth to this account
-        tub.exit(releasedPeth);                //convert PETH to WETH
+            releasedPeth = mul(tub.ink(sender.cdpID),10 ** -9) // get unlocked PETH; convert from RAY to WAD
+            tub.free(sender.cdpID, releasedPeth); //release the remaining peth
+            tub.exit(releasedPeth);  //convert PETH to WETH
 
-        // what you would do if your position appreciated
-        for (uint i = sender.layers-1; i > 0; i--) {
-             daiAmount = wmul(wdiv(sender.principal,(sender.collatRatio**i)),sender.purchPrice); //calculate the amount of Dai necessary to unlock the amount of peth you need to keep the collat ratio
-             wethAmount = wdiv(daiAmount,currPrice); // how much weth you need to buy necessary dai
+            wethAmount = wdiv(sender.daiAmountFinal,currPrice);
+            dex.buyAllAmount(weth, wethAmount, dai, sender.daiAmountFinal);
 
-             dex.sellAllAmount(weth, wethAmount, dai, daiAmount); //OasisDEX: buy dai with weth
-             sender.ethAmountFinal = add(sender.ethAmountFinal,sub(releasedPeth,wethAmount)); //save the extra amount of peth
+            payout = add(releasedPeth,wethAmount); // weth from cdp + weth from remaining dai
 
-             tub.wipe(sender.cdpID, daiAmount); //wipe off some of the the debt by paying back some of the Dai amount
+        } else {
 
-             releasedPeth = wdiv(wmul(daiAmount,sender.collatRatio),sender.purchPrice);  // calculate amount of peth that can be freed based off initial purchPrice
-             // inverseAsk = rdiv(msg.value, wmul(tub.gap(), tub.per())) - 1;
+            // back out of the last layer
+            tub.wipe(sender.cdpID, daiAmount);           //wipe off some debt by paying back some of the Dai Amount
+            releasedPeth = wdiv(wmul(daiAmount,sender.collatRatio),sender.purchPrice);  // release the initial ammount of PETH
 
-             tub.free(sender.cdpID, releasedPeth); //release peth to this account
-             tub.exit(releasedPeth);  //convert PETH to WETH
+            tub.free(sender.cdpID, releasedPeth);  //release peth to this account
+            tub.exit(releasedPeth);                //convert PETH to WETH
+
+            if (sender.purchPrice < currPrice) {
+                //*** If USD/ETH price deppreciated ***//
+
+                uint256 remainingDebt = 0;
+                uint256 extraPeth = 0;
+                // what you would do if your position appreciated
+                for (uint i = sender.layers; i > 0; i--) {
+
+                     daiAmount = wmul(releasedPeth,currPrice); // how much weth you need to buy necessary dai
+
+                     if (i == 1) {
+                         // daiAmount = remainingDebt TODO
+                         extraPeth = sub(releasedPeth,wdiv(remainingDebt,currPrice));
+                         releasedPeth = wdiv(remainingDebt,currPrice);
+                     }
+
+                     dex.sellAllAmount(weth, releasedPeth, dai, daiAmount); //OasisDEX: buy dai with weth
+
+                     tub.wipe(sender.cdpID, daiAmount); //wipe off some of the the debt by paying back some of the Dai amount;
+
+                     releasedPeth = wdiv(wmul(daiAmount,sender.collatRatio),sender.purchPrice);  // calculate amount of peth that can be freed based off initial purchPrice
+                     // inverseAsk = rdiv(msg.value, wmul(tub.gap(), tub.per())) - 1;
+
+                     tub.free(sender.cdpID, releasedPeth); //release peth to this account
+                     tub.exit(releasedPeth);  //convert PETH to WETH
+                }
+
+                payout = add(releasedPeth,extraPeth);
+
+            } else {
+                //*** USD/ETH price appreciated ***//
+
+                // what you would do if your position appreciated
+                for (uint i = sender.layers-1; i > 0; i--) {
+                     daiAmount = wmul(wdiv(sender.principal,mul(rpow(mul(sender.collatRatio,10 ** 9),i),10 ** -9)),sender.purchPrice); //calculate the amount of Dai necessary to unlock the amount of peth you need to keep the collat ratio
+                     wethAmount = wdiv(daiAmount,currPrice); // how much weth you need to buy necessary dai
+
+                     dex.sellAllAmount(weth, wethAmount, dai, daiAmount); //OasisDEX: buy dai with weth
+                     sender.ethAmountFinal = add(sender.ethAmountFinal,sub(releasedPeth,wethAmount)); //save the extra amount of peth
+
+                     tub.wipe(sender.cdpID, daiAmount); //wipe off some of the the debt by paying back some of the Dai amount;
+
+                     releasedPeth = wdiv(wmul(daiAmount,sender.collatRatio),sender.purchPrice);  // calculate amount of peth that can be freed based off initial purchPrice
+                     // inverseAsk = rdiv(msg.value, wmul(tub.gap(), tub.per())) - 1;
+
+                     tub.free(sender.cdpID, releasedPeth); //release peth to this account
+                     tub.exit(releasedPeth);  //convert PETH to WETH
+                }
+
+                payout = add(releasedPeth,sender.ethAmountFinal);
+
+            }
         }
-
-        payout = add(releasedPeth,sender.ethAmountFinal);
 
         IWETH(weth).withdraw(payout); //convert WETH to ETH
         tub.shut(sender.cdpID); //close down the cpds
 
         msg.sender.transfer(payout); //Send final ethAmount back to investor
+        deleteEntity(msg.sender); //delete the sender information
 
-        delete investors[msg.sender]; //delete the sender information 
-        //TODO add delete function 
+    }
 
+    // deletes investor's information from array and moves last index into place of deletion
+    function deleteEntity(address entityAddress) internal returns (bool success) {
+        uint rowToDelete = investors[entityAddress].index;
+        address keyToMove = investorAddresses[investorAddresses.length-1];
+        investorAddresses[rowToDelete] = keyToMove;
+        investors[keyToMove].index = rowToDelete;
+        investorAddresses.length--;
+        return true;
     }
 
     // Returns the variables contained in the Investor struct for a given address
