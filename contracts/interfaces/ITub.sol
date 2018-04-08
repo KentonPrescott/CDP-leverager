@@ -19,6 +19,8 @@ interface ITub {
 
     function ink(bytes32 cup) public view returns (uint);
     function rap(bytes32 cup) public returns (uint);
+    function tab(bytes32 cup) public returns (uint);
+    function chi() public returns (uint);
 
     function open() public returns (bytes32 cup);
     function give(bytes32 cup, address guy) public;

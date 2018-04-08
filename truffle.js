@@ -12,7 +12,7 @@ module.exports = {
       network_id: '*' // Match any network id
     },
     kovan: {
-      gas: 4000000,
+      gas: 4300000,
       gasPrice: 10000000000,
       provider: function () {
         return new HDWalletProvider(secrets.mnemonic, 'https://kovan.infura.io/' + infura.token)

@@ -18,6 +18,8 @@ contract CDPOpener is DSMath {
     uint256 public makerLR;
     uint256 public layers;
     uint256 public fee;
+    uint256 public tax;
+    uint256 public axe;
     ILiquidator public tap;
     IMatchingMarket public dex;
     uint constant WAD = 10 ** 18;
@@ -33,7 +35,6 @@ contract CDPOpener is DSMath {
         uint256 ethAmountFinal;  // Resulting amount of ETH that an investor gets after liquidating
         uint256 totalDebt;       // total amount of debt (dai)
         uint256 priceFloor;      // price floor
-        uint256 now;             // created now
         uint256 index;           // index of investor
     }
 
@@ -118,11 +119,18 @@ contract CDPOpener is DSMath {
         sender.collatRatio = collatRatio;
         sender.purchPrice = currPrice;
         sender.priceFloor = _priceFloor;
-        sender.created = now;
+        sender.principal = msg.value;
+
 
         IWETH(weth).deposit.value(msg.value)();       // wrap eth in weth token
-        // calculating mkrAmount was troublesome :( uint256 mkrAmount = wdiv(wmul(wmul(add(wdiv(sender.principal,2),add(wdiv(sender.principal,4),wdiv(sender.principal,8))),currPrice),fee),currPriceMKR);
-        uint256 mkrAmount = 340400000000000; // need to fix so about equation is correct and variable; note that sender.principal is assigned below this line
+
+        uint256 summation = 0; // used to find (Total debt - principal). doesn't take into account MKR fees..
+        for (uint256 n = 1; n < sender.layers+1; n++) {
+            summation = add(summation,wdiv(sender.principal,mul((2**n),WAD)));
+        }
+
+        uint256 mkrAmount = wdiv(wmul(wmul(summation,currPrice),ray2wad(fee)),currPriceMKR); // ((Total debt - principal) * govern fee) / (USD/MKR price)
+        //uint256 mkrAmount = 340400000000000; // need to fix so about equation is correct and variable; note that sender.principal is assigned below this line
         uint256 wethAmount = wmul(mkrAmount,wdiv(currPriceMKR,currPrice));
 
         dex.buyAllAmount(gov, mkrAmount, weth, wethAmount); //OasisDEX: buy mkr with weth
@@ -130,7 +138,7 @@ contract CDPOpener is DSMath {
         // calculate how much peth we need to enter with
         uint256 inverseAsk = rdiv(sub(msg.value, wethAmount), wmul(tub.gap(), tub.per())) - 1;
 
-        //record the principal minus fees used to purchase mkr
+        //reassign the principal = minus fees used to purchase mkr; this contract will accrue small amounts of MKR with usage
         sender.principal = sub(msg.value, wethAmount);
 
         tub.join(inverseAsk);                        // convert weth to peth
@@ -184,9 +192,12 @@ contract CDPOpener is DSMath {
         uint256 daiAmount = sender.daiAmountFinal;
 
         if (sender.priceFloor > currPrice){
-            //*** CDP is auto-liquidated  ***//
+            //*** CDP is auto-liquidated                              ***//
+            //*** Convert to WETH and send back to investor = 1 + 2   ***//
+            //*** 1. Unlocked PETH in CDP                             ***//
+            //*** 2. Outstanding DAI from final layer                 ***//
 
-            releasedPeth = mul(tub.ink(sender.cdpID),10 ** -9) // get unlocked PETH; convert from RAY to WAD
+            releasedPeth = ray2wad(tub.ink(sender.cdpID)); // get unlocked PETH; convert from RAY to WAD
             tub.free(sender.cdpID, releasedPeth); //release the remaining peth
             tub.exit(releasedPeth);  //convert PETH to WETH
 
@@ -197,7 +208,7 @@ contract CDPOpener is DSMath {
 
         } else {
 
-            // back out of the last layer
+            // back out of the last layer of CDP onion
             tub.wipe(sender.cdpID, daiAmount);           //wipe off some debt by paying back some of the Dai Amount
             releasedPeth = wdiv(wmul(daiAmount,sender.collatRatio),sender.purchPrice);  // release the initial ammount of PETH
 
@@ -205,18 +216,19 @@ contract CDPOpener is DSMath {
             tub.exit(releasedPeth);                //convert PETH to WETH
 
             if (sender.purchPrice < currPrice) {
-                //*** If USD/ETH price deppreciated ***//
+                //*** USD/ETH price deppreciated                                     ***//
+                //*** Back out of CDP onion by using more WETH to pay off the debt.  ***//
+                //*** Takes one extra layer to erase debt and empty PETH from cdp.   ***//
 
-                uint256 remainingDebt = 0;
+                uint remainingDebt = 0;
                 uint256 extraPeth = 0;
-                // what you would do if your position appreciated
                 for (uint i = sender.layers; i > 0; i--) {
 
                      daiAmount = wmul(releasedPeth,currPrice); // how much weth you need to buy necessary dai
 
                      if (i == 1) {
-                         // daiAmount = remainingDebt TODO
-                         extraPeth = sub(releasedPeth,wdiv(remainingDebt,currPrice));
+                         remainingDebt = ray2wad(rdiv(tub.tab(sender.cdpID),tub.chi())); //converted to WAD
+                         extraPeth = sub(releasedPeth,wdiv(remainingDebt,currPrice));     //calculate extra peth that is not used up in final wipe call
                          releasedPeth = wdiv(remainingDebt,currPrice);
                      }
 
@@ -234,11 +246,12 @@ contract CDPOpener is DSMath {
                 payout = add(releasedPeth,extraPeth);
 
             } else {
-                //*** USD/ETH price appreciated ***//
+                //*** USD/ETH price appreciated                                              ***//
+                //*** Back out of CDP onion by using less WETH to pay off the debt.          ***//
+                //*** Send cumulative amount of extra weth left over each layer unwrapping   ***//
 
-                // what you would do if your position appreciated
-                for (uint i = sender.layers-1; i > 0; i--) {
-                     daiAmount = wmul(wdiv(sender.principal,mul(rpow(mul(sender.collatRatio,10 ** 9),i),10 ** -9)),sender.purchPrice); //calculate the amount of Dai necessary to unlock the amount of peth you need to keep the collat ratio
+                for (uint n = sender.layers-1; n > 0; n--) {
+                     daiAmount = wmul(wdiv(sender.principal,ray2wad(rpow(wad2ray(sender.collatRatio),n))),sender.purchPrice); //calculate the amount of Dai necessary to unlock the amount of peth you need to keep the collat ratio
                      wethAmount = wdiv(daiAmount,currPrice); // how much weth you need to buy necessary dai
 
                      dex.sellAllAmount(weth, wethAmount, dai, daiAmount); //OasisDEX: buy dai with weth
@@ -288,13 +301,20 @@ contract CDPOpener is DSMath {
        uint ethAmountFinal,
        uint256 totalDebt)
    {
-     Investor storage investor;
-     investor = investors[_addr];
+     Investor storage investor = investors[_addr];
      return (investor.layers, investor.principal, investor.collatRatio, investor.cdpID, investor.purchPrice, investor.daiAmountFinal, investor.ethAmountFinal, investor.totalDebt);
    }
 
-    //NOTE: TESTING PURPOSES ONLY
-    function kill() public {
-        selfdestruct(msg.sender);
-    }
+   function wad2ray(uint256 _wad) public returns (uint256) {
+      return wmul(_wad,RAY);
+   }
+
+   function ray2wad(uint256 _ray) public returns (uint256) {
+      return rmul(_ray,WAD);
+   }
+
+   //NOTE: TESTING PURPOSES ONLY
+   function kill() public {
+       selfdestruct(msg.sender);
+   }
 }
