@@ -64,11 +64,11 @@ contract CDPOpener is DSMath {
       tap = tub.tap();
       gov = tub.gov();
       fee = tub.fee(); // MKR fee in RAY; To-Do: need to capture fee on time of leverage/liquidate
-      tax = rpow(tub.tax(),31536000); // Stability fee in RAY. Maxed out at 5%
+      tax = rpow(tub.tax(),31536000); // Stability fee in RAY. Maxed out at 5%, but can be changed
       axe = tub.axe(); // Liquidation penalty in RAY
       dex = IMatchingMarket(_oasisDex);
 
-      makerLR = 150; // changed from 151 to 150 to help with liquidation logic
+      makerLR = 1500000000000000000; // changed from 151 to 150 to help with liquidation logic
       layers = 3;
 
       // we approve tub, tap, and dex to access weth, peth, and dai contracts
@@ -112,18 +112,13 @@ contract CDPOpener is DSMath {
         require(_priceFloor < currPrice);
 
         // calculate collateralization ratio from price floor
-        uint256 collatRatio = wdiv(wmul(currPrice, makerLR), wmul(_priceFloor, 100));
+        uint256 collatRatio = wdiv(wmul(currPrice, makerLR),_priceFloor);
 
         //Add information about investor to database
         Investor memory sender;
         sender.index = investorAddresses.push(msg.sender) - 1;
         sender.layers = layers;
         sender.collatRatio = collatRatio;
-
-        //this gets the best offer and minimizes chances of round off error when wiping dai.
-        // TODO - elaborate on the following edge case: if delta is negative, || currPrice - purchPrice || is proportionate to chances of failure..
-        // Actually, if currPrice is at all lower that purchPrice, then it may fail.
-        // Failure sympton, it tries to wipe more dai than perscribed in a specific level
         uint256 wethAmt;
         uint256 daiAmt;
         (wethAmt, , daiAmt, ) = dex.getOffer(dex.getBestOffer(weth, dai));
@@ -134,6 +129,8 @@ contract CDPOpener is DSMath {
 
         IWETH(weth).deposit.value(msg.value)();       // wrap eth in weth token
 
+
+        // this
         /* uint256 summation = 0; // used to find (Total debt - principal). doesn't take into account MKR fees..
         for (uint256 n = 1; n < sender.layers+1; n++) {
             summation = add(summation,wdiv(sender.principal,ray2wad(rpow(wad2ray(sender.collatRatio),n))));
@@ -169,7 +166,7 @@ contract CDPOpener is DSMath {
 
           //tap.bust(wdiv(daiAmount,currPrice));       // Liquidator: convert dai to peth by buying peth from forced cdps
           wethAmount = dex.getBuyAmount(weth, dai, daiAmount);    // calculate how much weth to get at market rate
-          dex.buyAllAmount(weth, wethAmount, dai, wmul(daiAmount,1020000000000000000)); //OasisDEX: buy as much weth as possible.
+          dex.buyAllAmount(weth, wethAmount, dai, daiAmount); //OasisDEX: buy as much weth as possible.
 
           inverseAsk = rdiv(wethAmount, wmul(tub.gap(), tub.per())) - 1;  // look at declaration
           tub.join(inverseAsk);            // convert all weth to peth
@@ -182,8 +179,6 @@ contract CDPOpener is DSMath {
           sender.totalDebt = add(sender.totalDebt,daiAmount);
 
         }
-        //dai.transfer(msg.sender, daiAmount);                // transfer dai to owner
-        //tub.give(sender.cdpID, msg.sender);                 // transfer cdp to owner
         sender.daiAmountFinal = daiAmount;           //record how much dai is required to back out position
 
         investors[msg.sender] = sender;
@@ -213,7 +208,7 @@ contract CDPOpener is DSMath {
             tub.free(sender.cdpID, releasedPeth); //release the remaining peth
             tub.exit(releasedPeth);  //convert PETH to WETH
 
-            wethAmount = wdiv(sender.daiAmountFinal,currPrice);
+            wethAmount = dex.getBuyAmount(weth, dai, sender.daiAmountFinal);    // calculate how much weth to get at market rate
             dex.buyAllAmount(weth, wethAmount, dai, sender.daiAmountFinal);
 
             payout = add(releasedPeth,wethAmount); // weth from cdp + weth from remaining dai
@@ -222,71 +217,54 @@ contract CDPOpener is DSMath {
 
             // back out of the last layer of CDP onion
             tub.wipe(sender.cdpID, daiAmount);           //wipe off some debt by paying back some of the Dai Amount
-            releasedPeth = wdiv(wmul(daiAmount,sender.collatRatio),sender.purchPrice);  // release the initial ammount of PETH
+            releasedPeth = wdiv(wmul(daiAmount,makerLR),sender.purchPrice);  // release the initial ammount of PETH
 
             tub.free(sender.cdpID, releasedPeth);  //release peth to this account
             tub.exit(releasedPeth);                //convert PETH to WETH
 
-            if (sender.purchPrice > currPrice) { // TODO: consider if currPrice should actually be market rate of OasisDex
-                //*** USD/ETH price deppreciated                                     ***//
-                //*** Back out of CDP onion by using more WETH to pay off the debt.  ***//
-                //*** Takes one extra layer to erase debt and empty PETH from cdp.   ***//
+            //*** USD/ETH price deppreciated
+            // OR
+            //*** USD/ETH price appreciated
 
-                uint remainingDebt = 0;
-                uint256 extraPeth = 0;
-                for (uint i = sender.layers; i > 0; i--) {
-                     daiAmount = dex.getBuyAmount(dai, weth, releasedPeth);    // calculate how much dai you need to get Weth at market rate
 
-                     if (i == 1) {
-                         remainingDebt = ray2wad(rdiv(tub.tab(sender.cdpID),tub.chi()));  //converted to WAD
-                         extraPeth = sub(releasedPeth,wdiv(remainingDebt,currPrice));     //calculate extra peth that is not used up in final wipe call
-                         releasedPeth = wdiv(remainingDebt,currPrice);
-                     }
+            uint remainingDebt = ray2wad(rdiv(tub.tab(sender.cdpID),tub.chi()));
+            uint256 remainingDai;
 
-                     dex.buyAllAmount(dai, daiAmount, weth, wmul(releasedPeth,1020000000000000000)); //OasisDEX: buy dai with weth
+            while (remainingDebt > 0) {
 
-                     tub.wipe(sender.cdpID, daiAmount); //wipe off some of the the debt by paying back some of the Dai amount;
+                 //calculate the amount of Dai necessary to trade all Weth
+                 daiAmount = dex.getBuyAmount(dai, weth, releasedPeth);  // how much dai you need to sell WETH at the market rate
 
-                     releasedPeth = wdiv(wmul(daiAmount,sender.collatRatio),sender.purchPrice);  // calculate amount of peth that can be freed based off initial purchPrice
-                     // inverseAsk = rdiv(msg.value, wmul(tub.gap(), tub.per())) - 1;
+                 dex.buyAllAmount(dai, daiAmount, weth, releasedPeth); //OasisDEX: buy dai with weth; willing to trade 2% over market rate
 
-                     tub.free(sender.cdpID, releasedPeth); //release peth to this account
-                     tub.exit(releasedPeth);  //convert PETH to WETH
-                }
+                 if (daiAmount > remainingDebt) {
+                   remainingDai = sub(daiAmount,remainingDebt);
+                   daiAmount = remainingDebt;
+                 }
 
-                payout = add(releasedPeth,extraPeth);
+                 tub.wipe(sender.cdpID, daiAmount); //wipe off some of the the debt by paying back some of the Dai amount;
+                 remainingDebt -= daiAmount;
 
-            } else {
-                //*** USD/ETH price appreciated                                              ***//
-                //*** Back out of CDP onion by using less WETH to pay off the debt.          ***//
-                //*** Send cumulative amount of extra weth left over each layer unwrapping   ***//
-                uint256 intermediary;
-                for (uint n = sender.layers-1; n > 0; n--) {
-                     //calculate the amount of Dai necessary to unlock the amount of peth you need to keep the collat ratio
-                     intermediary = ray2wad(rpow(wad2ray(sender.collatRatio),n));
-                     daiAmount = wmul(wdiv(sender.principal,intermediary),sender.purchPrice);
-                     wethAmount = dex.getPayAmount(weth,dai,daiAmount); // how much weth you need to buy necessary dai at the market rate
+                 releasedPeth = wdiv(wmul(daiAmount,makerLR),sender.priceFloor);  // calculate amount of peth that can be freed based off initial purchPrice
 
-                     dex.buyAllAmount(dai, daiAmount, weth, wmul(wethAmount,1020000000000000000)); //OasisDEX: buy dai with weth
-                     sender.ethAmountFinal = add(sender.ethAmountFinal,sub(releasedPeth,wethAmount)); //save the extra amount of peth
-
-                     tub.wipe(sender.cdpID, daiAmount); //wipe off some of the the debt by paying back some of the Dai amount;
-
-                     releasedPeth = wdiv(wmul(daiAmount,sender.collatRatio),sender.purchPrice);  // calculate amount of peth that can be freed based off initial purchPrice
-                     // inverseAsk = rdiv(msg.value, wmul(tub.gap(), tub.per())) - 1;
-
-                     //free about 1% less peth. this accounts for difference in OasisDex market buy price and Maker price feed
-                     tub.free(sender.cdpID, wmul(releasedPeth,99000000000000000)); //release peth to this account
-                     tub.exit(releasedPeth);  //convert PETH to WETH
-                }
-
-                payout = add(releasedPeth,sender.ethAmountFinal);
-
+                 tub.free(sender.cdpID, releasedPeth); //release peth to this account
+                 tub.exit(releasedPeth);  //convert PETH to WETH
             }
+
+
+            uint256 finalPeth = ray2wad(tub.ink(sender.cdpID));
+            tub.free(sender.cdpID, finalPeth); //release Final peth to this account
+
+            wethAmount = dex.getBuyAmount(weth, dai, remainingDai);    // calculate how much weth to get at market rate
+            dex.buyAllAmount(weth, wethAmount, dai, remainingDai); //OasisDEX: convert the remainingDai to weth
+
+            payout = add(releasedPeth,wethAmount);
+
+
         }
 
         IWETH(weth).withdraw(payout); //convert WETH to ETH
-        tub.shut(sender.cdpID); //close down the cpds
+        tub.give(sender.cdpID, msg.sender);   // transfer cdp to owner
 
         msg.sender.transfer(payout); //Send final ethAmount back to investor
         deleteEntity(msg.sender); //delete the sender information
@@ -328,6 +306,8 @@ contract CDPOpener is DSMath {
    function ray2wad(uint256 _ray) public returns (uint256) {
       return rmul(_ray,WAD);
    }
+
+   function() payable public {}
 
    //NOTE: TESTING PURPOSES ONLY
    function kill() public {
