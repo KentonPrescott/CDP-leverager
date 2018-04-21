@@ -176,7 +176,6 @@ contract CDPOpener is DSMath {
         uint256 daiAmount = sender.daiAmountFinal;
 
 
-
         if (sender.priceFloor > currPrice) {
             //*** CDP is auto-liquidated                              ***//
             //*** Convert to WETH and send back to investor = 1 + 2   ***//
@@ -198,9 +197,12 @@ contract CDPOpener is DSMath {
             uint remainingDebt = wdiv(tub.tab(sender.cdpID),ray2wad(tub.chi()));
             uint256 remainingDai;
 
+            IWETH(weth).deposit.value(msg.value)();
+            bytes32 val;
+            (val, ) = pep.peek();
+
             uint256 rate = rdiv(tub.rap(sender.cdpID), tub.tab(sender.cdpID));
-            uint256 daiFee = ray2wad(rmul(remainingDebt,rate));
-            uint256 mkrFee = wdiv(daiFee,currPriceMKR);
+            uint256 mkrFee = wdiv(rmul(remainingDebt,rate),uint(val));
             uint256 wethFee = dex.getPayAmount(weth, gov, mkrFee);
 
             require (wethFee <= msg.value); //verify that correct amount of weth is sent
@@ -208,6 +210,8 @@ contract CDPOpener is DSMath {
 
             // back out of the last layer of CDP onion
             tub.wipe(sender.cdpID, daiAmount);           //wipe off some debt by paying back some of the Dai Amount
+            remainingDebt -= daiAmount;
+            
             releasedPeth = wdiv(wmul(daiAmount,makerLR),sender.purchPrice);  // release the initial ammount of PETH
 
             releaseWeth(sender.cdpID, releasedPeth);
