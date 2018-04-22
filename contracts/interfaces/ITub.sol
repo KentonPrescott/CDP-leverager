@@ -15,6 +15,7 @@ interface ITub {
     function fee() public view returns (uint256);
     function tax() public view returns (uint256);
     function axe() public view returns (uint256);
+    function mat() public view returns (uint256);
 
     function ink(bytes32 cup) public view returns (uint);
     function rap(bytes32 cup) public returns (uint);
