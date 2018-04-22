@@ -99,9 +99,9 @@ contract CDPOpener is DSMath {
         uint256 currPrice = uint256(pip.read());                             // DAI/WETH In WAD
 
         // ensure that the price floor is less than the current price of eth
-        require(_priceFloor < currPrice);                                        // "Price floor should not be less than the Dai/Eth price feed."
-        require(0 < msg.value);                                                  // "Ether is required to open a position."
-        //require(investorAddresses[investors[msg.sender].index] != msg.sender);   // "Previous position must be liquidated before opening a new one"
+        require(_priceFloor < currPrice, "Price floor should not be less than the Dai/Eth price feed.");
+        require(0 < msg.value, "Ether is required to open a position.");                                                  //
+        //require(investorAddresses[investors[msg.sender].index] != msg.sender, "Previous position must be liquidated before opening a new one");
 
         // calculate collateralization ratio from price floor
         uint256 collatRatio = wdiv(wmul(currPrice, makerLR),_priceFloor);
@@ -192,12 +192,10 @@ contract CDPOpener is DSMath {
             uint256 remainingDai;
 
             IWETH(weth).deposit.value(msg.value)();
-            bytes32 val;
-            (val, ) = pep.peek();                                            // maker price feed
 
-            uint256 rate = rdiv(tub.rap(sender.cdpID), tub.tab(sender.cdpID));
-            uint256 mkrFee = wdiv(rmul(remainingDebt,rate),uint(val));
-            uint256 wethFee = dex.getPayAmount(weth, gov, mkrFee);
+            uint256 mkrFee;
+            uint256 wethFee;
+            (mkrFee, wethFee) = govFee(sender.cdpID, remainingDebt);
 
             require(wethFee<=msg.value, "Not enough ether provided for fees");      // verify that correct amount of weth is sent
             dex.buyAllAmount(gov, mkrFee, weth, wethFee);                           // OasisDEX: convert the remainingDai to weth
@@ -207,6 +205,7 @@ contract CDPOpener is DSMath {
 
             releasedPeth = wdiv(wmul(daiAmount,makerLR),sender.purchPrice);
             releaseWeth(sender.cdpID, releasedPeth);                                // release the initial ammount of PETH, convert to WETH
+            remainingPeth -= releasedPeth;
 
             while (remainingDebt > 0) {
                  daiAmount = marketBuy(dai, weth, releasedPeth);
@@ -220,20 +219,26 @@ contract CDPOpener is DSMath {
 
                  releasedPeth = wdiv(wmul(daiAmount,makerLR),sender.priceFloor);    // calculate the max amount of peth that can be released
 
-                 if (releasedPeth > 0) {
-
-
+                 if (sub(remainingPeth,releasedPeth) < 5000000000000000) {
+                    if (remainingDebt == 0) {
+                        releasedPeth = remainingPeth;
+                    } else {
+                        releasedPeth = sub(remainingPeth,5100000000000000);
+                        releaseWeth(sender.cdpID, releasedPeth);
+                        break;
+                    }
                  }
                  releaseWeth(sender.cdpID, releasedPeth);                           // release peth and convert to weth
+                 remainingPeth -= releasedPeth;
             }
 
             uint256 finalPeth = ray2wad(tub.ink(sender.cdpID));              // find remaining locked peth
-
             releaseWeth(sender.cdpID, finalPeth);                            // release remaining peth and convert to weth
 
             wethAmount = marketBuy(weth, dai, remainingDai);                 // convert left over dai to weth
 
             payout = add(add(releasedPeth,wethAmount),finalPeth);
+            //payout = add(releasedPeth,wethAmount);
 
 
         }
@@ -262,6 +267,15 @@ contract CDPOpener is DSMath {
     function wipeDebt(bytes32 _cdpID, uint256 _daiAmount, uint256 _remainingDebt) internal returns (uint256 remainingDebt) {
         tub.wipe(_cdpID, _daiAmount);                                        // wipe off some of the the debt by paying back some of the Dai amount
         remainingDebt = sub(_remainingDebt,_daiAmount);                                        // deduct from previous debt
+    }
+
+    function govFee(bytes32 _cdpID, uint256 _remainingDebt) internal returns (uint256 wethFee, uint256 mkrFee) {
+        bytes32 val;
+        (val, ) = pep.peek();                                                // maker price feed
+
+        uint256 rate = rdiv(tub.rap(_cdpID), tub.tab(_cdpID));
+        mkrFee = wdiv(rmul(_remainingDebt,rate),uint(val));
+        wethFee = dex.getPayAmount(weth, gov, mkrFee);
     }
 
 
