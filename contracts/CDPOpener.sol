@@ -96,24 +96,28 @@ contract CDPOpener is DSMath {
         // 1000000000000000000 WAD = 1 normal unit (eg 1 dollar or 1 eth)
         // 5000000000000000 = 0.5%
 
-        uint256 currPrice = uint256(pip.read());                             // DAI/WETH In WAD
+        uint256 currPriceEth = uint256(pip.read());                             // DAI/WETH In WAD
+        uint256 currPricePeth = wmul(currPriceEth,wdiv(weth2peth(1*WAD),(1*WAD)));
 
         // ensure that the price floor is less than the current price of eth
-        require(_priceFloor < currPrice, "Price floor should not be less than the Dai/Eth price feed.");
+        require(_priceFloor < currPriceEth, "Price floor should not be less than the Dai/Eth price feed.");
         require(0 < msg.value, "Ether is required to open a position.");                                                  //
         //require(investorAddresses[investors[msg.sender].index] != msg.sender, "Previous position must be liquidated before opening a new one");
 
         // calculate collateralization ratio from price floor
-        uint256 collatRatio = wdiv(wmul(currPrice, makerLR),_priceFloor);
+        uint256 collatRatio = wdiv(wmul(currPriceEth, makerLR),_priceFloor);
+
+        //find exchange rate for weth/Dai
+        uint256 wethAmt;
+        uint256 daiAmt;
+        (wethAmt, , daiAmt, ) = dex.getOffer(dex.getBestOffer(weth, dai));
+
 
         //Add information about investor to database
         Investor memory sender;
         sender.index = investorAddresses.push(msg.sender) - 1;
         sender.layers = _layers;
         sender.collatRatio = collatRatio;
-        uint256 wethAmt;
-        uint256 daiAmt;
-        (wethAmt, , daiAmt, ) = dex.getOffer(dex.getBestOffer(weth, dai));
         sender.purchPrice = wdiv(daiAmt,wethAmt);
         sender.priceFloor = _priceFloor;
         sender.principal = msg.value;
@@ -121,16 +125,12 @@ contract CDPOpener is DSMath {
 
         IWETH(weth).deposit.value(msg.value)();                              // wrap eth in weth token
 
-        uint256 wethAmount;
-
-        // calculate how much peth we need to enter with
-        uint256 inverseAsk = rdiv(sender.principal, wmul(tub.gap(), tub.per())) - 1;
-
-        tub.join(inverseAsk);                                                // convert weth to peth
-        uint256 pethAmount = peth.balanceOf(this);                           // get amount of peth we have
+        uint256 pethAmount = weth2peth(sender.principal);
+        tub.join(pethAmount);                                                // convert weth to peth
 
         // calculate dai we need to draw in order to create the collat ratio we want
-        uint256 daiAmount = wdiv(wmul(currPrice, inverseAsk), collatRatio);
+        uint256 daiAmount = wdiv(wmul(currPricePeth, pethAmount), collatRatio);
+        uint256 wethAmount;
 
         sender.cdpID = tub.open();                                           // create cdp in tub
         tub.lock(sender.cdpID, pethAmount);                                  // lock peth into cdp
@@ -140,13 +140,14 @@ contract CDPOpener is DSMath {
         for (uint256 i = 0; i < sender.layers-1; i++) {
           wethAmount = marketBuy(weth, dai, daiAmount);
 
-          inverseAsk = rdiv(wethAmount, wmul(tub.gap(), tub.per())) - 1;     // look at declaration
-          tub.join(inverseAsk);                                              // convert all weth to peth
+          pethAmount = weth2peth(wethAmount);
 
-          pethAmount = peth.balanceOf(this);                                 // retrieve peth balance
+          tub.join(pethAmount);                                              // convert all weth to peth
+
           tub.lock(sender.cdpID, pethAmount);                                // lock peth balance into cdp
 
-          daiAmount = wdiv(wmul(currPrice, inverseAsk), collatRatio);        // look at declaration
+          daiAmount = wdiv(wmul(currPricePeth, pethAmount), collatRatio);        // look at declaration
+
           tub.draw(sender.cdpID, daiAmount);                                 // create dai from cdp
 
 
@@ -161,18 +162,18 @@ contract CDPOpener is DSMath {
 
     function liquidate() payable onlyInvestor public {
 
-        uint256 currPrice = uint256(pip.read()); // DAI/WETH In WAD
+        uint256 currPriceEth = uint256(pip.read());                             // DAI/WETH In WAD
 
         Investor memory sender = investors[msg.sender];
 
         uint256 releasedPeth;
-        uint256 remainingPeth = ray2wad(tub.ink(sender.cdpID));              // retrieve value of unlocked peth
+        uint256 remainingPeth = tub.ink(sender.cdpID);              // retrieve value of unlocked peth
         uint256 payout;
         uint256 wethAmount;
         uint256 daiAmount = sender.daiAmountFinal;
 
 
-        if (sender.priceFloor > currPrice) {
+        if (tub.tab(sender.cdpID) == 0) {
             //*** CDP is auto-liquidated                              ***//
             //*** Convert to WETH and send back to investor = 1 + 2   ***//
             //*** 1. Unlocked PETH in CDP                             ***//
@@ -190,6 +191,7 @@ contract CDPOpener is DSMath {
 
             uint256 remainingDebt = sender.totalDebt;                           // WAD
             uint256 remainingDai;
+            uint256 excessWeth;
 
             IWETH(weth).deposit.value(msg.value)();
 
@@ -199,6 +201,7 @@ contract CDPOpener is DSMath {
 
             require(wethFee<=msg.value, "Not enough ether provided for fees");      // verify that correct amount of weth is sent
             dex.buyAllAmount(gov, mkrFee, weth, wethFee);                           // OasisDEX: convert the remainingDai to weth
+            excessWeth = sub(msg.value,wethFee);
 
             // back out of the last layer of CDP onion
             remainingDebt = wipeDebt(sender.cdpID, daiAmount, remainingDebt);       // wipe some dai and decrease remaining debt
@@ -232,12 +235,12 @@ contract CDPOpener is DSMath {
                  remainingPeth -= releasedPeth;
             }
 
-            uint256 finalPeth = ray2wad(tub.ink(sender.cdpID));              // find remaining locked peth
+            uint256 finalPeth = tub.ink(sender.cdpID);              // find remaining locked peth
             releaseWeth(sender.cdpID, finalPeth);                            // release remaining peth and convert to weth
 
             wethAmount = marketBuy(weth, dai, remainingDai);                 // convert left over dai to weth
 
-            payout = add(add(releasedPeth,wethAmount),finalPeth);
+            payout = add(add(add(releasedPeth,wethAmount),finalPeth),excessWeth);
             //payout = add(releasedPeth,wethAmount);
 
 
@@ -250,7 +253,7 @@ contract CDPOpener is DSMath {
 
         deleteEntity(msg.sender);                                            // delete the sender information
 
-        ClosePosition(msg.sender, currPrice);                                // Note, current price may be off by as much as 2%
+        ClosePosition(msg.sender, currPriceEth);                             // Note, current price may be off by as much as 2%
 
     }
 
@@ -269,13 +272,17 @@ contract CDPOpener is DSMath {
         remainingDebt = sub(_remainingDebt,_daiAmount);                                        // deduct from previous debt
     }
 
-    function govFee(bytes32 _cdpID, uint256 _remainingDebt) internal returns (uint256 wethFee, uint256 mkrFee) {
+    function govFee(bytes32 _cdpID, uint256 _remainingDebt) internal returns (uint256 mkrFee, uint256 wethFee) {
         bytes32 val;
         (val, ) = pep.peek();                                                // maker price feed
 
         uint256 rate = rdiv(tub.rap(_cdpID), tub.tab(_cdpID));
         mkrFee = wdiv(rmul(_remainingDebt,rate),uint(val));
         wethFee = dex.getPayAmount(weth, gov, mkrFee);
+    }
+
+    function weth2peth(uint256 _wethAmount) public returns (uint pethAmount) {
+        pethAmount = rdiv(_wethAmount, wmul(tub.gap(), tub.per())) - 1;       // WAD
     }
 
 
@@ -292,7 +299,7 @@ contract CDPOpener is DSMath {
 
 
     // Returns the variables contained in the Investor struct for a given address
-   function getInvestorS(address _addr) public constant
+   function getInvestor(address _addr) public constant
      returns (
        uint _layers,
        uint principal,
