@@ -1,6 +1,6 @@
 # CDP-leverager
 
-ETH-Leverager is a tool to streamline the process of opening multiple CDPs, allowing you to increase your leverage up to 3x. Please use caution, as the tool is still under development.
+CDP-Leverager is a tool to streamline the process of reinvesting in one CDP, allowing you to increase your leverage up to 3x. Please use caution, as the tool is still under development.
 
 ## Setup
 
