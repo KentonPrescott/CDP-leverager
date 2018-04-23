@@ -96,13 +96,13 @@ contract CDPOpener is DSMath {
         // 1000000000000000000 WAD = 1 normal unit (eg 1 dollar or 1 eth)
         // 5000000000000000 = 0.5%
 
-        uint256 currPriceEth = uint256(pip.read());                             // DAI/WETH In WAD
-        uint256 currPricePeth = wmul(currPriceEth,wdiv(weth2peth(1*WAD),(1*WAD)));
+        uint256 currPriceEth = uint256(pip.read());                                   // DAI/WETH In WAD
+        uint256 currPricePeth = wmul(currPriceEth,wdiv(weth2peth(1*WAD),(1*WAD)));    // DAI/PETH In WAD
 
         // ensure that the price floor is less than the current price of eth
         require(_priceFloor < currPriceEth, "Price floor should not be less than the Dai/Eth price feed.");
-        require(0 < msg.value, "Ether is required to open a position.");                                                  //
-        //require(investorAddresses[investors[msg.sender].index] != msg.sender, "Previous position must be liquidated before opening a new one");
+        require(0 < msg.value, "Ether is required to open a position.");
+        require(investors[msg.sender].principal == 0, "Previous position must be liquidated before opening a new one");
 
         // calculate collateralization ratio from price floor
         uint256 collatRatio = wdiv(wmul(currPriceEth, makerLR),_priceFloor);
@@ -146,7 +146,7 @@ contract CDPOpener is DSMath {
 
           tub.lock(sender.cdpID, pethAmount);                                // lock peth balance into cdp
 
-          daiAmount = wdiv(wmul(currPricePeth, pethAmount), collatRatio);        // look at declaration
+          daiAmount = wdiv(wmul(currPricePeth, pethAmount), collatRatio);    // look at declaration
 
           tub.draw(sender.cdpID, daiAmount);                                 // create dai from cdp
 
@@ -162,12 +162,12 @@ contract CDPOpener is DSMath {
 
     function liquidate() payable onlyInvestor public {
 
-        uint256 currPriceEth = uint256(pip.read());                             // DAI/WETH In WAD
+        uint256 currPriceEth = uint256(pip.read());                          // DAI/WETH In WAD
 
         Investor memory sender = investors[msg.sender];
 
         uint256 releasedPeth;
-        uint256 remainingPeth = tub.ink(sender.cdpID);              // retrieve value of unlocked peth
+        uint256 remainingPeth = tub.ink(sender.cdpID);                       // retrieve value of unlocked peth
         uint256 payout;
         uint256 wethAmount;
         uint256 daiAmount = sender.daiAmountFinal;
@@ -182,14 +182,14 @@ contract CDPOpener is DSMath {
             releaseWeth(sender.cdpID, remainingPeth);                        // release peth and convert to weth
             wethAmount = marketBuy(weth, dai, sender.daiAmountFinal);        // buy weth with remaining dai
 
-            payout = add(remainingPeth,wethAmount);                           // weth from cdp + weth from remaining dai
+            payout = add(remainingPeth,wethAmount);                          // weth from cdp + weth from remaining dai
 
         } else {
 
             require(0 < msg.value, "Ether is required to liqudiate.");
             //*** USD/ETH price deppreciated OR appreciated
 
-            uint256 remainingDebt = sender.totalDebt;                           // WAD
+            uint256 remainingDebt = sender.totalDebt;                        // WAD
             uint256 remainingDai;
             uint256 excessWeth;
 
@@ -231,17 +231,22 @@ contract CDPOpener is DSMath {
                         break;
                     }
                  }
-                 releaseWeth(sender.cdpID, releasedPeth);                           // release peth and convert to weth
+                 releaseWeth(sender.cdpID, releasedPeth);                    // release peth and convert to weth
                  remainingPeth -= releasedPeth;
             }
 
-            uint256 finalPeth = tub.ink(sender.cdpID);              // find remaining locked peth
-            releaseWeth(sender.cdpID, finalPeth);                            // release remaining peth and convert to weth
+            uint256 finalPeth;
+            if (sender.layers < 4) {
+                finalPeth = tub.ink(sender.cdpID);                           // find remaining locked peth
+                releaseWeth(sender.cdpID, finalPeth);                        // release remaining peth and convert to weth
+            } else {
+                finalPeth = 0;
+            }
+
 
             wethAmount = marketBuy(weth, dai, remainingDai);                 // convert left over dai to weth
 
             payout = add(add(add(releasedPeth,wethAmount),finalPeth),excessWeth);
-            //payout = add(releasedPeth,wethAmount);
 
 
         }
@@ -291,6 +296,7 @@ contract CDPOpener is DSMath {
     function deleteEntity(address entityAddress) internal returns (bool success) {
         uint rowToDelete = investors[entityAddress].index;
         address keyToMove = investorAddresses[investorAddresses.length-1];
+        investors[entityAddress].principal = 0;
         investorAddresses[rowToDelete] = keyToMove;
         investors[keyToMove].index = rowToDelete;
         investorAddresses.length--;
