@@ -1,6 +1,6 @@
-pragma solidity ^0.4.16;
+pragma solidity ^0.4.19;
 
 interface DSValue {
-    function peek() public view returns (bytes32, bool);
-    function read() public view returns (bytes32);
+    function peek() external view returns (bytes32, bool);
+    function read() external view returns (bytes32);
 }

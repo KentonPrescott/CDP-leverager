@@ -1,5 +1,5 @@
-const CDPOpener = artifacts.require("./CDPOpener.sol");
+const CDPLeverage = artifacts.require("./CDPLeverage.sol");
 
 module.exports = function(deployer) {
-  deployer.deploy(CDPOpener);
+  deployer.deploy(CDPLeverage);
 };

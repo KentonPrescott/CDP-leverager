@@ -1,5 +1,5 @@
-pragma solidity ^0.4.16;
+pragma solidity ^0.4.19;
 
 interface Ipep {
-    function peek() public view returns (bytes32, bool);
+    function peek() external view returns (bytes32, bool);
 }

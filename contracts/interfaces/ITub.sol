@@ -1,42 +1,41 @@
-pragma solidity ^0.4.16;
+pragma solidity ^0.4.19;
 
-import "./ERC20.sol";
 import "./DSValue.sol";
 import "./DSToken.sol";
 import "./ILiquidator.sol";
 
 interface ITub {
-    function sai() public view returns (DSToken);
-    function skr() public view returns (DSToken);
-    function gem() public view returns (DSToken);
-    function pip() public view returns (DSValue);
-    function pep() public view returns (DSValue);
-    function gov() public view returns (DSToken);
-    function fee() public view returns (uint256);
-    function tax() public view returns (uint256);
-    function axe() public view returns (uint256);
-    function mat() public view returns (uint256);
+    function sai() external view returns (DSToken);
+    function skr() external view returns (DSToken);
+    function gem() external view returns (DSToken);
+    function pip() external view returns (DSValue);
+    function pep() external view returns (DSValue);
+    function gov() external view returns (DSToken);
+    function fee() external view returns (uint256);
+    function tax() external view returns (uint256);
+    function axe() external view returns (uint256);
+    function mat() external view returns (uint256);
 
-    function ink(bytes32 cup) public view returns (uint);
-    function rap(bytes32 cup) public returns (uint);
-    function tab(bytes32 cup) public returns (uint);
-    function chi() public returns (uint);
+    function ink(bytes32 cup) external view returns (uint);
+    function rap(bytes32 cup) external returns (uint);
+    function tab(bytes32 cup) external returns (uint);
+    function chi() external returns (uint);
 
-    function open() public returns (bytes32 cup);
-    function give(bytes32 cup, address guy) public;
+    function open() external returns (bytes32 cup);
+    function give(bytes32 cup, address guy) external;
 
-    function gap() public view returns (uint);
-    function per() public view returns (uint);
+    function gap() external view returns (uint);
+    function per() external view returns (uint);
 
-    function ask(uint wad) public view returns (uint);
-    function bid(uint wad) public view returns (uint);
+    function ask(uint wad) external view returns (uint);
+    function bid(uint wad) external view returns (uint);
 
-    function join(uint wad) public;
-    function exit(uint wad) public;
-    function lock(bytes32 cup, uint wad) public;
-    function free(bytes32 cup, uint wad) public;
-    function draw(bytes32 cup, uint wad) public;
-    function wipe(bytes32 cup, uint wad) public;
-    function cage(uint fit_, uint jam) public;
-    function shut(bytes32 cup) public;
+    function join(uint wad) external;
+    function exit(uint wad) external;
+    function lock(bytes32 cup, uint wad) external;
+    function free(bytes32 cup, uint wad) external;
+    function draw(bytes32 cup, uint wad) external;
+    function wipe(bytes32 cup, uint wad) external;
+    function cage(uint fit_, uint jam) external;
+    function shut(bytes32 cup) external;
 }

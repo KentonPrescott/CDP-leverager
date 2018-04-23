@@ -1,7 +1,6 @@
 pragma solidity ^0.4.19;
 
 import "./interfaces/ITub.sol";
-import "./interfaces/ERC20.sol";
 import "./interfaces/DSValue.sol";
 import "./interfaces/IWETH.sol";
 import "./interfaces/IMatchingMarket.sol";
@@ -13,7 +12,8 @@ import "./DSMath.sol";
 * allowing you to increase your USD/ETH leverage up to 3x.
 *
 * Please use caution, as the tool is still under development.
-* For more information, visit: https://github.com/KentonPrescott/CDP-leverager
+* More information on the tool, visit: https://github.com/KentonPrescott/CDP-leverager
+* More information on Single Collateral Dai, visit: https://github.com/makerdao/sai
 */
 contract CDPLeverage is DSMath {
 
@@ -64,11 +64,11 @@ contract CDPLeverage is DSMath {
     * @dev Constructor function
     * Collects module information from the tub and matchingMarket (OasisDex)contracts
     */
-    function CDPOpener()
+    constructor()
         public
     {
-        address _tub = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;
-        address _oasisDex = 0x8cf1Cab422A0b6b554077A361f8419cDf122a9F9;
+        address _tub = 0xa71937147b55Deb8a530C7229C442Fd3F31b7db2;         //Kovan
+        address _oasisDex = 0x8cf1Cab422A0b6b554077A361f8419cDf122a9F9;    //Kovan
         tub = ITub(_tub);
         weth = tub.gem();
         peth = tub.skr();
@@ -76,21 +76,20 @@ contract CDPLeverage is DSMath {
         pip = tub.pip();
         pep = tub.pep();
         gov = tub.gov();
-        fee = tub.fee(); // MKR fee in RAY; To-Do: need to capture fee on time of leverage/liquidate
-        //tax = rpow(tub.tax(),31536000); // Stability fee in RAY. Maxed out at 5%, but can be changed
-        axe = tub.axe(); // Liquidation penalty in RAY
+        fee = tub.fee();
+        axe = tub.axe();
         dex = IMatchingMarket(_oasisDex);
 
         makerLR = ray2wad(tub.mat());
 
         // we approve tub, tap, and dex to access weth, peth, and dai contracts
-        weth.approve(tub, 100000000000000000000000);
-        weth.approve(dex, 100000000000000000000000);
-        peth.approve(tub, 100000000000000000000000);
-        dai.approve(tub, 100000000000000000000000);
-        dai.approve(dex, 100000000000000000000000);
-        gov.approve(tub, 100000000000000000000000);
-        gov.approve(dex, 100000000000000000000000);
+        weth.approve(tub, 1000000000000000000000000);
+        weth.approve(dex, 1000000000000000000000000);
+        peth.approve(tub, 1000000000000000000000000);
+        dai.approve(tub, 10000000000000000000000000000);
+        dai.approve(dex, 10000000000000000000000000000);
+        gov.approve(tub, 1000000000000000000000000);
+        gov.approve(dex, 1000000000000000000000000);
     }
 
     // Fallback function
@@ -128,7 +127,6 @@ contract CDPLeverage is DSMath {
         uint256 daiAmt;
         (wethAmt, , daiAmt, ) = dex.getOffer(dex.getBestOffer(weth, dai));
 
-
         //Add information about investor to database
         Investor memory sender;
         sender.index = investorAddresses.push(msg.sender) - 1;
@@ -139,40 +137,38 @@ contract CDPLeverage is DSMath {
         sender.principal = msg.value;
 
 
-        IWETH(weth).deposit.value(msg.value)();                              // wrap eth in weth token
+        IWETH(weth).deposit.value(msg.value)();
 
         uint256 pethAmount = weth2peth(sender.principal);
-        tub.join(pethAmount);                                                // convert weth to peth
+        tub.join(pethAmount);
 
         // calculate dai we need to draw in order to create the collat ratio we want
         uint256 daiAmount = wdiv(wmul(currPricePeth, pethAmount), collatRatio);
         uint256 wethAmount;
 
-        sender.cdpID = tub.open();                                           // create cdp in tub
-        tub.lock(sender.cdpID, pethAmount);                                  // lock peth into cdp
-        tub.draw(sender.cdpID, daiAmount);                                   // create dai from cdp
+        // create CDP, lock PETH, and draw DAI
+        sender.cdpID = tub.open();
+        tub.lock(sender.cdpID, pethAmount);
+        tub.draw(sender.cdpID, daiAmount);
 
-        //trade dai for peth and reinvest into cdp for # of layers
+        //trade DAI for PETH and reinvest into CDP for # of layers
         for (uint256 i = 0; i < sender.layers - 1; i++) {
             wethAmount = marketBuy(weth, dai, daiAmount);
-
             pethAmount = weth2peth(wethAmount);
 
-            tub.join(pethAmount);                                              // convert all weth to peth
+            tub.join(pethAmount);
+            tub.lock(sender.cdpID, pethAmount);
 
-            tub.lock(sender.cdpID, pethAmount);                                // lock peth balance into cdp
-
-            daiAmount = wdiv(wmul(currPricePeth, pethAmount), collatRatio);    // look at declaration
-
-            tub.draw(sender.cdpID, daiAmount);                                 // create dai from cdp
+            daiAmount = wdiv(wmul(currPricePeth, pethAmount), collatRatio);
+            tub.draw(sender.cdpID, daiAmount);
         }
 
-        sender.daiAmountFinal = daiAmount;                                   // record how much dai is required to back out position
+        sender.daiAmountFinal = daiAmount;
         sender.totalDebt = wdiv(tub.tab(sender.cdpID),ray2wad(tub.chi()));
 
         investors[msg.sender] = sender;
 
-        OpenPosition(msg.sender, msg.value, sender.purchPrice, _layers);
+        emit OpenPosition(msg.sender, msg.value, sender.purchPrice, _layers);
     }
 
 
@@ -182,7 +178,7 @@ contract CDPLeverage is DSMath {
     * 1. USD/ETH drops below sender's price floor
     * 2. USD/ETH appreciates relative to sender's purchase price
     * 3. USD/ETH deppreciates relative to sender's purchase price
-    * Sender must send ETH with function call to cover the governance fee with use of the Maker platform
+    * Sender must send ETH with function call to cover the governance and stability fee with use of the Maker platform
     * Any excess ETH will be returned with the closing of the position
     */
     function liquidate()
@@ -190,28 +186,26 @@ contract CDPLeverage is DSMath {
         onlyInvestor
         public
     {
-
         uint256 currPriceEth = uint256(pip.read());                          // DAI/WETH In WAD
 
         Investor memory sender = investors[msg.sender];
 
         uint256 releasedPeth;
-        uint256 remainingPeth = tub.ink(sender.cdpID);                       // retrieve value of unlocked peth
+        uint256 remainingPeth = tub.ink(sender.cdpID);                       // retrieve value of collatoral in CDP
         uint256 payout;
         uint256 wethAmount;
         uint256 daiAmount = sender.daiAmountFinal;
 
-
+        // checks if CDP debt is 0
         if (tub.tab(sender.cdpID) == 0) {
             //*** CDP is auto-liquidated
             //*** Convert to WETH and send back to investor = 1 + 2
-            //*** 1. Unlocked PETH in CDP
+            //*** 1. Remaining PETH in debt-free CDP
             //*** 2. Outstanding DAI from final layer
 
-            releaseWeth(sender.cdpID, remainingPeth);                        // release peth and convert to weth
-            wethAmount = marketBuy(weth, dai, sender.daiAmountFinal);        // buy weth with remaining dai
-
-            payout = add(remainingPeth,wethAmount);                          // weth from cdp + weth from remaining dai
+            releaseWeth(sender.cdpID, remainingPeth);
+            wethAmount = marketBuy(weth, dai, sender.daiAmountFinal);
+            payout = add(remainingPeth,wethAmount);
 
         } else {
 
@@ -219,8 +213,7 @@ contract CDPLeverage is DSMath {
 
             require(0 < msg.value, "Ether is required to liqudiate.");
 
-
-            uint256 remainingDebt = sender.totalDebt;                        // WAD
+            uint256 remainingDebt = sender.totalDebt;
             uint256 remainingDai;
             uint256 excessWeth;
 
@@ -228,76 +221,82 @@ contract CDPLeverage is DSMath {
 
             uint256 mkrFee;
             uint256 wethFee;
-            (mkrFee, wethFee) = govFee(sender.cdpID, remainingDebt);
+            (mkrFee, wethFee) = wipeFee(sender.cdpID, remainingDebt);
 
-            require(wethFee <= msg.value, "Not enough ether provided for fees");      // verify that correct amount of weth is sent
-            dex.buyAllAmount(gov, mkrFee, weth, wethFee);                           // OasisDEX: convert the remainingDai to weth
+            // Pay for governance fee
+            require(wethFee <= msg.value, "Not enough ether provided for fees");
+            dex.buyAllAmount(gov, mkrFee, weth, wethFee);
             excessWeth = sub(msg.value,wethFee);
 
-            // back out of the last layer of CDP onion
-            remainingDebt = wipeDebt(sender.cdpID, daiAmount, remainingDebt);       // wipe some dai and decrease remaining debt
-
+            // wipe last layer of cdp
+            remainingDebt = wipeDebt(sender.cdpID, daiAmount, remainingDebt);
             releasedPeth = wdiv(wmul(daiAmount,makerLR),sender.purchPrice);
-            releaseWeth(sender.cdpID, releasedPeth);                                // release the initial ammount of PETH, convert to WETH
+            releaseWeth(sender.cdpID, releasedPeth);
             remainingPeth -= releasedPeth;
 
+            // empty remaining debt or reach dust pan condition (CDP peth = 0.0051), whichever comes first
             while (remainingDebt > 0) {
                 daiAmount = marketBuy(dai, weth, releasedPeth);
 
                 if (daiAmount > remainingDebt) {
-                    remainingDai = sub(daiAmount,remainingDebt);                     // calculate left over dai
+                    remainingDai = sub(daiAmount,remainingDebt);
                     daiAmount = remainingDebt;
                 }
 
-                remainingDebt = wipeDebt(sender.cdpID, daiAmount, remainingDebt);  // wipe some dai and decrease remaining debt
+                remainingDebt = wipeDebt(sender.cdpID, daiAmount, remainingDebt);
+                releasedPeth = wdiv(wmul(daiAmount,makerLR),sender.priceFloor);
 
-                releasedPeth = wdiv(wmul(daiAmount,makerLR),sender.priceFloor);    // calculate the max amount of peth that can be released
-
+                // dust pan condition, where remainingPeth cannot be below 0.005 peth
                 if (sub(remainingPeth,releasedPeth) < 5000000000000000) {
                     if (remainingDebt == 0) {
                         releasedPeth = remainingPeth;
                     } else {
                         releasedPeth = sub(remainingPeth,5100000000000000);
                         releaseWeth(sender.cdpID, releasedPeth);
+                        remainingPeth = 5100000000000000;
                         break;
                     }
                 }
 
-               releaseWeth(sender.cdpID, releasedPeth);                    // release peth and convert to weth
+               releaseWeth(sender.cdpID, releasedPeth);
                remainingPeth -= releasedPeth;
             }
 
+            // release any final peth
             uint256 finalPeth;
-            if (sender.layers < 4) {
-                finalPeth = tub.ink(sender.cdpID);                           // find remaining locked peth
-                releaseWeth(sender.cdpID, finalPeth);                        // release remaining peth and convert to weth
+            if (remainingDebt == 0 && remainingPeth != 0) {
+                finalPeth = tub.ink(sender.cdpID);
+                releaseWeth(sender.cdpID, finalPeth);
             } else {
                 finalPeth = 0;
             }
 
-
-            wethAmount = marketBuy(weth, dai, remainingDai);                 // convert left over dai to weth
+            // convert left over dai to weth
+            wethAmount = marketBuy(weth, dai, remainingDai);
 
             payout = add(add(add(releasedPeth,wethAmount),finalPeth),excessWeth);
-
-
         }
 
-        IWETH(weth).withdraw(payout);                                        // convert WETH to ETH
-        tub.give(sender.cdpID, msg.sender);                                  // transfer cdp to owner
+        // convert WETH to ETH
+        IWETH(weth).withdraw(payout);
 
-        msg.sender.transfer(payout);                                         // Send final ethAmount back to investor
+        // give cdp to owner
+        // if dustpan condition hit, cdp will have 0.0051 peth left
+        tub.give(sender.cdpID, msg.sender);
 
-        deleteEntity(msg.sender);                                            // delete the sender information
+        msg.sender.transfer(payout);
 
-        ClosePosition(msg.sender, currPriceEth);                             // Note, current price may be off by as much as 2%
+       // delete the sender information from investorAddresses array
+        deleteEntity(msg.sender);
+
+        emit ClosePosition(msg.sender, currPriceEth);
 
     }
 
 
     /**
     * @dev Returns the variables contained in the Investor struct for a given address
-    * @param _addr
+    * @param _addr - investor address
     */
     function getInvestor(address _addr)
         public
@@ -329,18 +328,21 @@ contract CDPLeverage is DSMath {
 
     /**
     * @dev Returns amount of PETH for a given amount of WETH at exchange rate
-    * @param _wethAmount
+    * @param _wethAmount - literal
     */
-    function weth2peth(uint256 _wethAmount) public returns (uint pethAmount) {
+    function weth2peth(uint256 _wethAmount)
+        view
+        public
+        returns (uint pethAmount) {
         pethAmount = rdiv(_wethAmount, wmul(tub.gap(), tub.per())) - 1;      // WAD
     }
 
 
     /**
     * @dev Executes a market buy order and returns the amount of asset recieved
-    * @param _to
-    * @param _from
-    * @param _fromAmount
+    * @param _to - token getting
+    * @param _from - token giving
+    * @param _fromAmount - amount of token giving
     */
     function marketBuy(DSToken _to, DSToken _from, uint256 _fromAmount)
         internal
@@ -353,8 +355,8 @@ contract CDPLeverage is DSMath {
 
     /**
     * @dev Free's locked CDP collateral (PETH) and converts it to WETH
-    * @param _cdpID
-    * @param _peth
+    * @param _cdpID - verbatim
+    * @param _peth - amount of peth
     */
     function releaseWeth(bytes32 _cdpID, uint256 _peth) internal {
         tub.free(_cdpID, _peth);                                             // empty all unlocked peth to this account
@@ -364,9 +366,9 @@ contract CDPLeverage is DSMath {
 
     /**
     * @dev Decreases CDP debt by wiping DAI and returns the remaining debt
-    * @param _cdpID
-    * @param _daiAmount
-    * @param _remainingDebt
+    * @param _cdpID - verbatim
+    * @param _daiAmount - verbatim
+    * @param _remainingDebt - in DAI
     */
     function wipeDebt(bytes32 _cdpID, uint256 _daiAmount, uint256 _remainingDebt)
         internal
@@ -378,11 +380,11 @@ contract CDPLeverage is DSMath {
 
 
     /**
-    * @dev Calculates the governance fee (in DAI) in terms of weth and mkr at the given market rate
-    * @param _cdpID
-    * @param _remainingDebt
+    * @dev Calculates the governance and stability fee (in DAI) in terms of weth and mkr at the given market rate
+    * @param _cdpID - verbatim
+    * @param _remainingDebt - in DAI
     */
-    function govFee(bytes32 _cdpID, uint256 _remainingDebt)
+    function wipeFee(bytes32 _cdpID, uint256 _remainingDebt)
         internal
         returns (uint256 mkrFee, uint256 wethFee)
     {
@@ -398,7 +400,7 @@ contract CDPLeverage is DSMath {
     /**
     * @dev Deletes investor's information from array and moves last index into place of deletion
     * May not delete with one investor
-    * @param _entityAddress
+    * @param _entityAddress - verbatim
     */
     function deleteEntity(address _entityAddress)
         internal
@@ -406,7 +408,7 @@ contract CDPLeverage is DSMath {
     {
         uint rowToDelete = investors[_entityAddress].index;
         address keyToMove = investorAddresses[investorAddresses.length-1];
-        investors[entityAddress].principal = 0;
+        investors[_entityAddress].principal = 0;
         investorAddresses[rowToDelete] = keyToMove;
         investors[keyToMove].index = rowToDelete;
         investorAddresses.length--;
@@ -416,9 +418,10 @@ contract CDPLeverage is DSMath {
 
     /**
     * @dev WAD to RAY conversion
-    * @param _wad
+    * @param _wad - 10**18
     */
     function wad2ray(uint256 _wad)
+        pure
         internal
         returns (uint256)
     {
@@ -428,9 +431,10 @@ contract CDPLeverage is DSMath {
 
     /**
     * @dev RAY to WAD conversion
-    * @param _ray
+    * @param _ray - 10**27
     */
     function ray2wad(uint256 _ray)
+        pure
         internal
         returns (uint256)
     {
