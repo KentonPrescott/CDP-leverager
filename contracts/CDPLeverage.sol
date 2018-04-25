@@ -37,15 +37,16 @@ contract CDPLeverage is DSMath {
         uint256 layers;          // Number of CDP layers. According to github schematic
         uint256 principal;       // WAD - Principal contribution in Eth
         uint256 collatRatio;     // WAD - Collaterazation ratio
-        bytes32 cdpID;           // Array of cdpID
+        bytes32 cdpID;           // cdpID
         uint256 purchPrice;      // WAD; currPrice at time of purchase
         uint256 daiAmountFinal;  // WAD - Amount of Dai that an investor has after leveraging
-        uint256 totalDebt;       // WAD - Total amount of debt (dai)
+        uint256 totalDebt;       // WAD - Total amount of debt (DAI)
         uint256 priceFloor;      // WAD - Price floor
         uint256 index;           // index of investor
     }
     mapping (address => Investor) public investors;
     address[] public investorAddresses;
+
 
     // Modifiers
     modifier onlyInvestor {
@@ -92,8 +93,10 @@ contract CDPLeverage is DSMath {
         gov.approve(dex, 1000000000000000000000000);
     }
 
+
     // Fallback function
     function() payable public {}
+
 
     /**
     * @dev Leverage - Creates a leveraged long USD/ETH position
