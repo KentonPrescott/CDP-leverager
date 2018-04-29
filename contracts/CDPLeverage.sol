@@ -1,4 +1,4 @@
-pragma solidity ^0.4.19;
+pragma solidity ^0.4.22;
 
 import "./interfaces/ITub.sol";
 import "./interfaces/DSValue.sol";
@@ -35,14 +35,14 @@ contract CDPLeverage is DSMath {
     // This Struct tracks position information for a specific investor address
     struct Investor {
         uint256 layers;          // Number of CDP layers. According to github schematic
-        uint256 principal;       // WAD - Principal contribution in Eth
+        uint256 principalETH;       // WAD - principalETH contribution in Eth
         uint256 collatRatio;     // WAD - Collaterazation ratio
         bytes32 cdpID;           // cdpID
-        uint256 purchPrice;      // WAD; currPrice at time of purchase
         uint256 daiAmountFinal;  // WAD - Amount of Dai that an investor has after leveraging
-        uint256 totalDebt;       // WAD - Total amount of debt (DAI)
+        uint256 drawnDai;        // WAD - Total amount of DAI drawn
         uint256 priceFloor;      // WAD - Price floor
         uint256 index;           // index of investor
+        uint256 purchPrice;      // WAD; currPrice at time of purchase
     }
     mapping (address => Investor) public investors;
     address[] public investorAddresses;
@@ -57,7 +57,7 @@ contract CDPLeverage is DSMath {
 
 
     // Events
-    event OpenPosition(address owner, uint256 principalEth, uint256 purchPrice, uint256 layers);
+    event OpenPosition(address owner, uint256 principalETH, uint256 purchPrice, uint256 layers);
     event ClosePosition(address owner, uint256 sellPrice);
 
 
@@ -84,13 +84,13 @@ contract CDPLeverage is DSMath {
         makerLR = ray2wad(tub.mat());
 
         // we approve tub, tap, and dex to access weth, peth, and dai contracts
-        weth.approve(tub, 1000000000000000000000000);
-        weth.approve(dex, 1000000000000000000000000);
-        peth.approve(tub, 1000000000000000000000000);
-        dai.approve(tub, 10000000000000000000000000000);
-        dai.approve(dex, 10000000000000000000000000000);
-        gov.approve(tub, 1000000000000000000000000);
-        gov.approve(dex, 1000000000000000000000000);
+        weth.approve(tub, uint(-1));
+        weth.approve(dex, uint(-1));
+        peth.approve(tub, uint(-1));
+        dai.approve(tub, uint(-1));
+        dai.approve(dex, uint(-1));
+        gov.approve(tub, uint(-1));
+        gov.approve(dex, uint(-1));
     }
 
 
@@ -100,17 +100,17 @@ contract CDPLeverage is DSMath {
 
     /**
     * @dev Leverage - Creates a leveraged long USD/ETH position
-    * Principal (message value) of sender is used to:
+    * principalETH (message value) of sender is used to:
     * 1. Open CDP
     * 2. Lock PETH into a CDP
     * 3. Draw DAI and trade for WETH on OasisDEX
     * 4. Convert WETH to PETH
     * 5. Repeat steps 2 - 4 for # of (layers-1) prescribed
     * 6. Holds CDP ownership and remaining DAI
-    * @param _priceFloor - position liquidated if USD/ETH price drops below this point
+    * @param _priceFloorETH - position liquidated if USD/ETH price drops below this point
     * @param _layers - # of layers used to leverage
     */
-    function leverage(uint256 _priceFloor, uint256 _layers)
+    function leverage(uint256 _priceFloorETH, uint256 _layers)
         payable
         public
     {
@@ -118,56 +118,54 @@ contract CDPLeverage is DSMath {
         uint256 currPricePeth = wmul(currPriceEth,wdiv(weth2peth(1*WAD),(1*WAD)));    // DAI/PETH In WAD
 
         // ensure that the price floor is less than the current price of eth
-        require(_priceFloor < currPriceEth, "Price floor should not be less than the Dai/Eth price feed.");
+        require(_priceFloorETH < currPriceEth, "Price floor should not be less than the Dai/Eth price feed.");
         require(0 < msg.value, "Ether is required to open a position.");
-        require(investors[msg.sender].principal == 0, "Previous position must be liquidated before opening a new one");
+        require(investors[msg.sender].principalETH == 0, "Previous position must be liquidated before opening a new one");
 
         // calculate collateralization ratio from price floor
-        uint256 collatRatio = wdiv(wmul(currPriceEth, makerLR),_priceFloor);
-
-        //find exchange rate for weth/Dai
-        uint256 wethAmt;
-        uint256 daiAmt;
-        (wethAmt, , daiAmt, ) = dex.getOffer(dex.getBestOffer(weth, dai));
+        uint256 collatRatio = wdiv(wmul(currPriceEth, makerLR),_priceFloorETH);
 
         //Add information about investor to database
         Investor memory sender;
         sender.index = investorAddresses.push(msg.sender) - 1;
+        sender.principalETH = msg.value;
         sender.layers = _layers;
         sender.collatRatio = collatRatio;
-        sender.purchPrice = wdiv(daiAmt,wethAmt);
-        sender.priceFloor = _priceFloor;
-        sender.principal = msg.value;
+        sender.priceFloor = _priceFloorETH;
+        sender.purchPrice = estimatePurchPrice(
+            sender.principalETH,
+            sender.collatRatio,
+            sender.layers
+        );
 
+        uint256 wethAmount;
+        uint256 pethAmount;
+        uint256 daiAmount;
 
         IWETH(weth).deposit.value(msg.value)();
-
-        uint256 pethAmount = weth2peth(sender.principal);
-        tub.join(pethAmount);
-
-        // calculate dai we need to draw in order to create the collat ratio we want
-        uint256 daiAmount = wdiv(wmul(currPricePeth, pethAmount), collatRatio);
-        uint256 wethAmount;
-
-        // create CDP, lock PETH, and draw DAI
         sender.cdpID = tub.open();
-        tub.lock(sender.cdpID, pethAmount);
-        tub.draw(sender.cdpID, daiAmount);
+
+        (daiAmount, pethAmount) = joinLockDraw(
+            sender.cdpID,
+            sender.principalETH,
+            currPricePeth,
+            sender.collatRatio
+        );
 
         //trade DAI for PETH and reinvest into CDP for # of layers
         for (uint256 i = 0; i < sender.layers - 1; i++) {
             wethAmount = marketBuy(weth, dai, daiAmount);
-            pethAmount = weth2peth(wethAmount);
+            (daiAmount, pethAmount) = joinLockDraw(
+                sender.cdpID,
+                wethAmount,
+                currPricePeth,
+                sender.collatRatio
+            );
 
-            tub.join(pethAmount);
-            tub.lock(sender.cdpID, pethAmount);
-
-            daiAmount = wdiv(wmul(currPricePeth, pethAmount), collatRatio);
-            tub.draw(sender.cdpID, daiAmount);
         }
 
         sender.daiAmountFinal = daiAmount;
-        sender.totalDebt = wdiv(tub.tab(sender.cdpID),ray2wad(tub.chi()));
+        sender.drawnDai = wdiv(tub.tab(sender.cdpID),ray2wad(tub.chi()));
 
         investors[msg.sender] = sender;
 
@@ -176,7 +174,7 @@ contract CDPLeverage is DSMath {
 
 
     /**
-    * @dev Liquidate - Liqduiates the sender's position and returns ETH
+    * @dev Liquidate - Liquidates the sender's position and returns ETH
     * Possible outcomes:
     * 1. USD/ETH drops below sender's price floor
     * 2. USD/ETH appreciates relative to sender's purchase price
@@ -216,20 +214,16 @@ contract CDPLeverage is DSMath {
 
             require(0 < msg.value, "Ether is required to liqudiate.");
 
-            uint256 remainingDebt = sender.totalDebt;
-            uint256 remainingDai;
+            uint256 remainingDebt = sender.drawnDai;
+            uint256 excessDai;
             uint256 excessWeth;
 
             IWETH(weth).deposit.value(msg.value)();
 
-            uint256 mkrFee;
-            uint256 wethFee;
-            (mkrFee, wethFee) = wipeFee(sender.cdpID, remainingDebt);
-
             // Pay for governance fee
-            require(wethFee <= msg.value, "Not enough ether provided for fees");
-            dex.buyAllAmount(gov, mkrFee, weth, wethFee);
+            uint256 wethFee = payFee(sender.cdpID, remainingDebt);
             excessWeth = sub(msg.value,wethFee);
+
 
             // wipe last layer of cdp
             remainingDebt = wipeDebt(sender.cdpID, daiAmount, remainingDebt);
@@ -242,12 +236,12 @@ contract CDPLeverage is DSMath {
                 daiAmount = marketBuy(dai, weth, releasedPeth);
 
                 if (daiAmount > remainingDebt) {
-                    remainingDai = sub(daiAmount,remainingDebt);
+                    excessDai = sub(daiAmount,remainingDebt);
                     daiAmount = remainingDebt;
                 }
 
                 remainingDebt = wipeDebt(sender.cdpID, daiAmount, remainingDebt);
-                releasedPeth = wdiv(wmul(daiAmount,makerLR),sender.priceFloor);
+                releasedPeth = wdiv(wmul(daiAmount,makerLR),weth2peth(sender.priceFloor));
 
                 // dust pan condition, where remainingPeth cannot be below 0.005 peth
                 if (sub(remainingPeth,releasedPeth) < 5000000000000000) {
@@ -275,7 +269,7 @@ contract CDPLeverage is DSMath {
             }
 
             // convert left over dai to weth
-            wethAmount = marketBuy(weth, dai, remainingDai);
+            wethAmount = marketBuy(weth, dai, excessDai);
 
             payout = add(add(add(releasedPeth,wethAmount),finalPeth),excessWeth);
         }
@@ -289,7 +283,7 @@ contract CDPLeverage is DSMath {
 
         msg.sender.transfer(payout);
 
-       // delete the sender information from investorAddresses array
+        // delete the sender pointer from investorAddresses array
         deleteEntity(msg.sender);
 
         emit ClosePosition(msg.sender, currPriceEth);
@@ -298,34 +292,43 @@ contract CDPLeverage is DSMath {
 
 
     /**
-    * @dev Returns the variables contained in the Investor struct for a given address
-    * @param _addr - investor address
+    * @dev Transfers CDP ownership to investor
     */
-    function getInvestor(address _addr)
+    function transferCDPOwnership()
+        onlyInvestor
         public
-        constant
-        returns (
-          uint _layers,
-          uint principal,
-          uint collatRatio,
-          bytes32 cdpID,
-          uint256 purchPrice,
-          uint daiAmountFinal,
-          uint256 totalDebt,
-          uint256 priceFloor,
-          uint256 index)
     {
-       Investor memory investor = investors[_addr];
-       return (
-         investor.layers,
-         investor.principal,
-         investor.collatRatio,
-         investor.cdpID,
-         investor.purchPrice,
-         investor.daiAmountFinal,
-         investor.totalDebt,
-         investor.priceFloor,
-         investor.index);
+        tub.give(investors[msg.sender].cdpID,msg.sender);
+    }
+
+    /**
+    * @dev Add funds to an existing CDP to increase its collateralization ratio
+    */
+    function addFunds()
+        onlyInvestor
+        payable
+        public
+    {
+        require(0 < msg.value, "Funds need to be sent with transaction");
+
+        Investor memory sender = investors[msg.sender];
+        uint256 currPriceEth = uint256(pip.read());
+        uint256 currPricePeth = wmul(currPriceEth,wdiv(weth2peth(1*WAD),(1*WAD)));
+
+        IWETH(weth).deposit.value(msg.value)();
+        uint256 pethAmount = weth2peth(msg.value);
+        tub.join(pethAmount);
+        tub.lock(sender.cdpID, pethAmount);
+
+        uint256 totalPeth = tub.ink(sender.cdpID);
+
+        sender.principalETH += msg.value;
+        sender.collatRatio = wdiv(wmul(totalPeth,currPricePeth),sender.drawnDai);
+        sender.priceFloor = wdiv(wmul(currPriceEth,makerLR),sender.collatRatio);
+
+        investors[msg.sender] = sender;
+
+
     }
 
 
@@ -336,23 +339,78 @@ contract CDPLeverage is DSMath {
     function weth2peth(uint256 _wethAmount)
         view
         public
-        returns (uint pethAmount) {
+        returns (uint pethAmount)
+    {
         pethAmount = rdiv(_wethAmount, wmul(tub.gap(), tub.per())) - 1;      // WAD
     }
 
 
     /**
-    * @dev Executes a market buy order and returns the amount of asset recieved
-    * @param _to - token getting
-    * @param _from - token giving
-    * @param _fromAmount - amount of token giving
+    * @dev Updates the state varuabkes that reflect Maker's risk parameters
     */
-    function marketBuy(DSToken _to, DSToken _from, uint256 _fromAmount)
-        internal
-        returns (uint256 toAmount)
+    function updateVars()
+        public
+        returns (bool success)
     {
-        toAmount = dex.getBuyAmount(_to, _from, _fromAmount);                // calculate how much of _to to get at market and with _fromAmount
-        dex.buyAllAmount(_to, toAmount, _from, _fromAmount);                 // OasisDEX market buy
+        weth = tub.gem();
+        peth = tub.skr();
+        dai = tub.sai();
+        pip = tub.pip();
+        pep = tub.pep();
+        gov = tub.gov();
+        fee = tub.fee();
+        axe = tub.axe();
+        makerLR = ray2wad(tub.mat());
+
+        return true;
+    }
+
+
+    /**
+    * @dev Returns the average USD/ETH price on OasisDex
+    * @param _principalETH - initial investment
+    * @param _CR - Collateralization ratio
+    * @param _layers - reinvestment layers
+    */
+    function estimatePurchPrice(uint256 _principalETH, uint256 _CR, uint256 _layers)
+        view
+        internal
+        returns (uint256 purchPrice)
+    {
+        uint256 totalWethBought = 0;
+        for (uint256 n = 1; n < _layers; n++) {
+           totalWethBought = add(totalWethBought,wdiv(_principalETH,wpow(_CR,n)));
+        }
+
+        uint256 daiAmount = dex.getPayAmount(dai, weth, totalWethBought);
+        purchPrice = wdiv(daiAmount,totalWethBought);
+    }
+
+
+    function joinLockDraw(bytes32 _cdpID, uint256 _wethAmount, uint256 _currPricePeth, uint256 _collatRatio)
+        internal
+        returns (uint256 daiAmount, uint256 pethAmount)
+    {
+        pethAmount = weth2peth(_wethAmount);
+        tub.join(pethAmount);
+        tub.lock(_cdpID, pethAmount);
+
+        daiAmount = wdiv(wmul(_currPricePeth, pethAmount), _collatRatio);
+        tub.draw(_cdpID, daiAmount);
+    }
+
+    /**
+    * @dev Executes a market buy order and returns the amount of asset recieved
+    * @param _buying - token buying
+    * @param _selling - token selling
+    * @param _sellingAmount - amount of token selling
+    */
+    function marketBuy(DSToken _buying, DSToken _selling, uint256 _sellingAmount)
+        internal
+        returns (uint256 buyingAmount)
+    {
+        buyingAmount = dex.getBuyAmount(_buying, _selling, _sellingAmount);                // calculate how much of _buying to get at market and with _sellingAmount
+        dex.buyAllAmount(_buying, buyingAmount, _selling, _sellingAmount);                 // OasisDEX market buy
     }
 
 
@@ -378,7 +436,7 @@ contract CDPLeverage is DSMath {
         returns (uint256 remainingDebt)
     {
         tub.wipe(_cdpID, _daiAmount);                                        // wipe off some of the the debt by paying back some of the Dai amount
-        remainingDebt = sub(_remainingDebt,_daiAmount);                                        // deduct from previous debt
+        remainingDebt = sub(_remainingDebt,_daiAmount);                      // deduct from previous debt
     }
 
 
@@ -387,16 +445,18 @@ contract CDPLeverage is DSMath {
     * @param _cdpID - verbatim
     * @param _remainingDebt - in DAI
     */
-    function wipeFee(bytes32 _cdpID, uint256 _remainingDebt)
+    function payFee(bytes32 _cdpID, uint256 _remainingDebt)
         internal
-        returns (uint256 mkrFee, uint256 wethFee)
+        returns (uint256 wethFee)
     {
-        bytes32 val;
-        (val, ) = pep.peek();                                                // maker price feed
+        uint256 mkrUSDPrice = uint256(pep.read());                           // maker price feed
 
         uint256 rate = rdiv(tub.rap(_cdpID), tub.tab(_cdpID));
-        mkrFee = wdiv(rmul(_remainingDebt,rate),uint(val));
+        uint256 mkrFee = wmul(1100000000000000000,wdiv(rmul(_remainingDebt,rate),mkrUSDPrice));
         wethFee = dex.getPayAmount(weth, gov, mkrFee);
+
+        require(wethFee <= msg.value, "Not enough ether provided for fees");
+        dex.buyAllAmount(gov, mkrFee, weth, wethFee);
     }
 
 
@@ -411,7 +471,7 @@ contract CDPLeverage is DSMath {
     {
         uint rowToDelete = investors[_entityAddress].index;
         address keyToMove = investorAddresses[investorAddresses.length-1];
-        investors[_entityAddress].principal = 0;
+        investors[_entityAddress].principalETH = 0;
         investorAddresses[rowToDelete] = keyToMove;
         investors[keyToMove].index = rowToDelete;
         investorAddresses.length--;

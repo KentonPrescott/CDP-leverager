@@ -1,4 +1,4 @@
-pragma solidity ^0.4.18;
+pragma solidity ^0.4.22;
 
 contract DSMath {
     function add(uint x, uint y) internal pure returns (uint z) {
@@ -38,6 +38,17 @@ contract DSMath {
     }
     function rdiv(uint x, uint y) public pure returns (uint z) {
         z = add(mul(x, RAY), y / 2) / y;
+    }
+    function wpow(uint x, uint n) internal pure returns (uint z) {
+        z = n % 2 != 0 ? x : WAD;
+
+        for (n /= 2; n != 0; n /= 2) {
+            x = wmul(x, x);
+
+            if (n % 2 != 0) {
+                z = wmul(z, x);
+            }
+        }
     }
     function rpow(uint x, uint n) internal pure returns (uint z) {
         z = n % 2 != 0 ? x : RAY;
