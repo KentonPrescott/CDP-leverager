@@ -40,7 +40,7 @@ contract CDPLeverage is DSMath {
         bytes32 cdpID;           // cdpID
         uint256 daiAmountFinal;  // WAD - Amount of Dai that an investor has after leveraging
         uint256 drawnDai;        // WAD - Total amount of DAI drawn
-        uint256 priceFloor;      // WAD - Price floor
+        uint256 priceFloor;      // WAD - Price floor in ETH
         uint256 index;           // index of investor
         uint256 purchPrice;      // WAD; currPrice at time of purchase
     }
@@ -218,12 +218,9 @@ contract CDPLeverage is DSMath {
             uint256 excessDai;
             uint256 excessWeth;
 
-            IWETH(weth).deposit.value(msg.value)();
-
             // Pay for governance fee
             uint256 wethFee = payFee(sender.cdpID, remainingDebt);
             excessWeth = sub(msg.value,wethFee);
-
 
             // wipe last layer of cdp
             remainingDebt = wipeDebt(sender.cdpID, daiAmount, remainingDebt);
@@ -233,40 +230,20 @@ contract CDPLeverage is DSMath {
 
             // empty remaining debt or reach dust pan condition (CDP peth = 0.0051), whichever comes first
             while (remainingDebt > 0) {
-                daiAmount = marketBuy(dai, weth, releasedPeth);
-
-                if (daiAmount > remainingDebt) {
-                    excessDai = sub(daiAmount,remainingDebt);
-                    daiAmount = remainingDebt;
-                }
-
-                remainingDebt = wipeDebt(sender.cdpID, daiAmount, remainingDebt);
-                releasedPeth = wdiv(wmul(daiAmount,makerLR),weth2peth(sender.priceFloor));
-
-                // dust pan condition, where remainingPeth cannot be below 0.005 peth
-                if (sub(remainingPeth,releasedPeth) < 5000000000000000) {
-                    if (remainingDebt == 0) {
-                        releasedPeth = remainingPeth;
-                    } else {
-                        releasedPeth = sub(remainingPeth,5100000000000000);
-                        releaseWeth(sender.cdpID, releasedPeth);
-                        remainingPeth = 5100000000000000;
-                        break;
-                    }
-                }
-
-               releaseWeth(sender.cdpID, releasedPeth);
-               remainingPeth -= releasedPeth;
+                (releasedPeth, remainingPeth, remainingDebt, excessDai) = unravelCDP(
+                    releasedPeth,
+                    remainingPeth,
+                    remainingDebt,
+                    sender.cdpID,
+                    sender.priceFloor
+                );
             }
+            finalPeth = releaseFinalPeth(
+                sender,cdpID,
+                remainingDebt,
+                remainingPeth
+            );
 
-            // release any final peth
-            uint256 finalPeth;
-            if (remainingDebt == 0 && remainingPeth != 0) {
-                finalPeth = tub.ink(sender.cdpID);
-                releaseWeth(sender.cdpID, finalPeth);
-            } else {
-                finalPeth = 0;
-            }
 
             // convert left over dai to weth
             wethAmount = marketBuy(weth, dai, excessDai);
@@ -299,6 +276,7 @@ contract CDPLeverage is DSMath {
         public
     {
         tub.give(investors[msg.sender].cdpID,msg.sender);
+        investors[msg.sender].principalETH = 0;
     }
 
     /**
@@ -387,7 +365,11 @@ contract CDPLeverage is DSMath {
     }
 
 
-    function joinLockDraw(bytes32 _cdpID, uint256 _wethAmount, uint256 _currPricePeth, uint256 _collatRatio)
+    function joinLockDraw(
+        bytes32 _cdpID,
+        uint256 _wethAmount,
+        uint256 _currPricePeth,
+        uint256 _collatRatio)
         internal
         returns (uint256 daiAmount, uint256 pethAmount)
     {
@@ -413,13 +395,109 @@ contract CDPLeverage is DSMath {
         dex.buyAllAmount(_buying, buyingAmount, _selling, _sellingAmount);                 // OasisDEX market buy
     }
 
+    function unravelCDP(
+        uint256 _releasedPeth,
+        uint256 _remainingPeth,
+        uint256 _remainingDebt,
+        bytes32 _cdpID,
+        uint256 _priceFloorETH)
+        internal
+        returns (
+            uint256 releasedPeth,
+            uint256 remainingPeth,
+            uint256 remainingDebt,
+            uint256 excessDai)
+    {
+        uint256 daiAmount = marketBuy(dai, weth, _releasedPeth);
+
+        (daiAmount, excessDai) = zeroDebtCondition(
+            daiAmount,
+            _remainingDebt
+        );
+
+        remainingDebt = wipeDebt(_cdpID, daiAmount, _remainingDebt);
+        releasedPeth = wdiv(wmul(daiAmount,makerLR),weth2peth(_priceFloorETH);
+
+        (releasedPeth, remainingPeth) = dustPanCondition(
+            releasedPeth,
+            _remainingPeth,
+            remainingDebt,
+            _cdpID
+        );
+
+        releaseWeth(sender.cdpID, releasedPeth);
+        remainingPeth -= releasedPeth;
+
+    }
+
+    function zeroDebtCondition(uint256 _daiAmount, uint256 _remainingDebt)
+        internal
+        returns (uint256 daiAmount, uint256 excessDai)
+    {
+        if (_daiAmount > _remainingDebt) {
+            excessDai = sub(_daiAmount,_remainingDebt);
+            daiAmount = _remainingDebt;
+        }
+    }
+
+
+    function dustPanCondition(
+        uint256 _releasedPeth,
+        uint256 _remainingPeth,
+        uint256 _remainingDebt,
+        bytes32 _cdpID)
+        internal
+        returns (uint256 releasedPeth, uint256 remainingPeth)
+    {
+
+        // dust pan condition, where remainingPeth cannot be below 0.005 peth
+        if (sub(_remainingPeth,_releasedPeth) < 5000000000000000) {
+            if (_remainingDebt == 0) {
+                releasedPeth = _remainingPeth;
+            } else {
+                releasedPeth = sub(_remainingPeth,5000000010000000);
+                releaseWeth(_cdpID, releasedPeth);
+                remainingPeth = 5000000010000000;
+                break;
+            }
+        } else {
+            releasedPeth = _releasedPeth;
+            remainingPeth = _remainingPeth;
+        }
+
+
+    }
+
 
     /**
     * @dev Free's locked CDP collateral (PETH) and converts it to WETH
     * @param _cdpID - verbatim
     * @param _peth - amount of peth
     */
-    function releaseWeth(bytes32 _cdpID, uint256 _peth) internal {
+    function releaseFinalPeth(
+        bytes32 _cdpID,
+        uint256 _remainingDebt,
+        uint256 _remainingPeth)
+        internal
+        returns (uint256 finalPeth)
+    {
+        if (_remainingDebt == 0 && _remainingPeth != 0) {
+            finalPeth = tub.ink(_cdpID);
+            releaseWeth(_cdpID, finalPeth);
+        } else {
+            finalPeth = 0;
+        }
+    }
+
+
+    /**
+    * @dev Free's locked CDP collateral (PETH) and converts it to WETH
+    * @param _cdpID - verbatim
+    * @param _peth - amount of peth
+    */
+    function releaseWeth(bytes32 _cdpID, uint256 _peth)
+        internal
+    {
         tub.free(_cdpID, _peth);                                             // empty all unlocked peth to this account
         tub.exit(_peth);                                                     // convert PETH to WETH
     }
@@ -449,6 +527,7 @@ contract CDPLeverage is DSMath {
         internal
         returns (uint256 wethFee)
     {
+        IWETH(weth).deposit.value(msg.value)();
         uint256 mkrUSDPrice = uint256(pep.read());                           // maker price feed
 
         uint256 rate = rdiv(tub.rap(_cdpID), tub.tab(_cdpID));

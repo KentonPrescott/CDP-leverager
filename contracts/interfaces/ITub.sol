@@ -2,7 +2,6 @@ pragma solidity ^0.4.22;
 
 import "./DSValue.sol";
 import "./DSToken.sol";
-import "./ILiquidator.sol";
 
 interface ITub {
     function sai() external view returns (DSToken);
