@@ -2,6 +2,8 @@ pragma solidity ^0.4.22;
 
 import "./DSToken.sol";
 
+// https://github.com/makerdao/maker-otc/blob/master/src/matching_market.sol
+
 interface IMatchingMarket {
   function buyAllAmount(DSToken buy_gem, uint buy_amt, DSToken pay_gem, uint max_fill_amount) external;
   function sellAllAmount(DSToken pay_gem, uint pay_amt, DSToken buy_gem, uint min_fill_amount) external;

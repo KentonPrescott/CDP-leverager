@@ -3,6 +3,8 @@ pragma solidity ^0.4.22;
 import "./DSValue.sol";
 import "./DSToken.sol";
 
+// https://github.com/makerdao/sai/blob/master/src/tub.sol
+
 interface ITub {
     function sai() external view returns (DSToken);
     function skr() external view returns (DSToken);

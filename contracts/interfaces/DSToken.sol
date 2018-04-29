@@ -1,5 +1,6 @@
 pragma solidity ^0.4.22;
 
+// https://github.com/dapphub/ds-token/blob/master/src/token.sol
 
 interface DSToken {
     function push(address dst, uint wad) external;

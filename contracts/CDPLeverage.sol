@@ -35,7 +35,7 @@ contract CDPLeverage is DSMath {
     // This Struct tracks position information for a specific investor address
     struct Investor {
         uint256 layers;          // Number of CDP layers. According to github schematic
-        uint256 principalETH;       // WAD - principalETH contribution in Eth
+        uint256 principalETH;    // WAD - principalETH contribution in Eth
         uint256 collatRatio;     // WAD - Collaterazation ratio
         bytes32 cdpID;           // cdpID
         uint256 daiAmountFinal;  // WAD - Amount of Dai that an investor has after leveraging
@@ -152,7 +152,7 @@ contract CDPLeverage is DSMath {
             sender.collatRatio
         );
 
-        //trade DAI for PETH and reinvest into CDP for # of layers
+        //trade DAI for WETH, convert WETH to PETH, and reinvest into CDP for # of layers
         for (uint256 i = 0; i < sender.layers - 1; i++) {
             wethAmount = marketBuy(weth, dai, daiAmount);
             (daiAmount, pethAmount) = joinLockDraw(
@@ -164,9 +164,9 @@ contract CDPLeverage is DSMath {
 
         }
 
+        //final variable and struct assigment
         sender.daiAmountFinal = daiAmount;
         sender.drawnDai = wdiv(tub.tab(sender.cdpID),ray2wad(tub.chi()));
-
         investors[msg.sender] = sender;
 
         emit OpenPosition(msg.sender, msg.value, sender.purchPrice, _layers);
@@ -228,18 +228,18 @@ contract CDPLeverage is DSMath {
             releaseWeth(sender.cdpID, releasedPeth);
             remainingPeth -= releasedPeth;
 
-            // empty remaining debt or reach dust pan condition (CDP peth = 0.0051), whichever comes first
-            while (remainingDebt > 0) {
-                (releasedPeth, remainingPeth, remainingDebt, excessDai) = unravelCDP(
-                    releasedPeth,
-                    remainingPeth,
-                    remainingDebt,
-                    sender.cdpID,
-                    sender.priceFloor
-                );
-            }
-            finalPeth = releaseFinalPeth(
-                sender,cdpID,
+            // unravel CDP onion
+            (releasedPeth, remainingPeth, remainingDebt, excessDai) = unravelCDP(
+                releasedPeth,
+                remainingPeth,
+                remainingDebt,
+                sender.cdpID,
+                sender.priceFloor
+            );
+
+            // check and free remaining peth
+            uint256 finalPeth = releaseFinalPeth(
+                sender.cdpID,
                 remainingDebt,
                 remainingPeth
             );
@@ -279,6 +279,7 @@ contract CDPLeverage is DSMath {
         investors[msg.sender].principalETH = 0;
     }
 
+
     /**
     * @dev Add funds to an existing CDP to increase its collateralization ratio
     */
@@ -289,10 +290,12 @@ contract CDPLeverage is DSMath {
     {
         require(0 < msg.value, "Funds need to be sent with transaction");
 
-        Investor memory sender = investors[msg.sender];
         uint256 currPriceEth = uint256(pip.read());
         uint256 currPricePeth = wmul(currPriceEth,wdiv(weth2peth(1*WAD),(1*WAD)));
 
+        Investor memory sender = investors[msg.sender];
+
+        // ETH -> WETH, WETH -> PETH, lock PETH in CDP
         IWETH(weth).deposit.value(msg.value)();
         uint256 pethAmount = weth2peth(msg.value);
         tub.join(pethAmount);
@@ -300,6 +303,7 @@ contract CDPLeverage is DSMath {
 
         uint256 totalPeth = tub.ink(sender.cdpID);
 
+        // re-assignment of variables
         sender.principalETH += msg.value;
         sender.collatRatio = wdiv(wmul(totalPeth,currPricePeth),sender.drawnDai);
         sender.priceFloor = wdiv(wmul(currPriceEth,makerLR),sender.collatRatio);
@@ -365,6 +369,13 @@ contract CDPLeverage is DSMath {
     }
 
 
+    /**
+    * @dev Joins (WETH -> PETH), Locks PETH in CDP, and Draws Dai from CDP
+    * @param _cdpID - ID of CDP
+    * @param _wethAmount - Amount of WETH that will be locked in CDP
+    * @param _currPricePeth - USD/PETH exchange rate
+    * @param _collatRatio - Collateralization ratio
+    */
     function joinLockDraw(
         bytes32 _cdpID,
         uint256 _wethAmount,
@@ -381,6 +392,7 @@ contract CDPLeverage is DSMath {
         tub.draw(_cdpID, daiAmount);
     }
 
+
     /**
     * @dev Executes a market buy order and returns the amount of asset recieved
     * @param _buying - token buying
@@ -391,10 +403,19 @@ contract CDPLeverage is DSMath {
         internal
         returns (uint256 buyingAmount)
     {
-        buyingAmount = dex.getBuyAmount(_buying, _selling, _sellingAmount);                // calculate how much of _buying to get at market and with _sellingAmount
-        dex.buyAllAmount(_buying, buyingAmount, _selling, _sellingAmount);                 // OasisDEX market buy
+        buyingAmount = dex.getBuyAmount(_buying, _selling, _sellingAmount);  // calculate how much of _buying to get at market and with _sellingAmount
+        dex.buyAllAmount(_buying, buyingAmount, _selling, _sellingAmount);   // OasisDEX market buy
     }
 
+
+    /**
+    * @dev Unravels CDP onion by wiping DAI, freeing PETH, PETH -> WETH, WETH -> DAI, repeat
+    * @param _releasedPeth - Amount of Peth released from unraveling the first last CDP layer
+    * @param _remainingPeth - Amount of remaining peth in CDP
+    * @param _remainingDebt - Amount of remaining Debt (DAI) in CDP
+    * @param _cdpID - verbatim
+    * @param _priceFloorETH - Price floor in ETH
+    */
     function unravelCDP(
         uint256 _releasedPeth,
         uint256 _remainingPeth,
@@ -408,46 +429,72 @@ contract CDPLeverage is DSMath {
             uint256 remainingDebt,
             uint256 excessDai)
     {
-        uint256 daiAmount = marketBuy(dai, weth, _releasedPeth);
+        releasedPeth = _releasedPeth;
+        remainingPeth = _remainingPeth;
+        remainingDebt = _remainingDebt;
+        bool breakCondition;
+        uint256 daiAmount;
 
-        (daiAmount, excessDai) = zeroDebtCondition(
-            daiAmount,
-            _remainingDebt
-        );
+        while (remainingDebt > 0) {
+            daiAmount = marketBuy(dai, weth, releasedPeth);
 
-        remainingDebt = wipeDebt(_cdpID, daiAmount, _remainingDebt);
-        releasedPeth = wdiv(wmul(daiAmount,makerLR),weth2peth(_priceFloorETH);
+            (daiAmount, excessDai) = zeroDebtCondition(
+                daiAmount,
+                remainingDebt
+            );
 
-        (releasedPeth, remainingPeth) = dustPanCondition(
-            releasedPeth,
-            _remainingPeth,
-            remainingDebt,
-            _cdpID
-        );
+            remainingDebt = wipeDebt(_cdpID, daiAmount, remainingDebt);
+            releasedPeth = wdiv(wmul(daiAmount,makerLR),weth2peth(_priceFloorETH));
 
-        releaseWeth(sender.cdpID, releasedPeth);
-        remainingPeth -= releasedPeth;
+            (releasedPeth, remainingPeth, breakCondition) = dustPanCondition(
+                releasedPeth,
+                remainingPeth,
+                remainingDebt,
+                _cdpID
+            );
+
+            if (breakCondition) { break; }
+
+            releaseWeth(_cdpID, releasedPeth);
+            remainingPeth -= releasedPeth;
+        }
 
     }
 
+
+    /**
+    * @dev Checks and ensures that the next wiping of DAI will eliminate all outstanding debt of CDP
+    * @param _daiAmount - amount of DAI that is about to be wiped
+    * @param _remainingDebt -  amount of remaining Debt (DAI) in CDP
+    */
     function zeroDebtCondition(uint256 _daiAmount, uint256 _remainingDebt)
+        pure
         internal
         returns (uint256 daiAmount, uint256 excessDai)
     {
         if (_daiAmount > _remainingDebt) {
             excessDai = sub(_daiAmount,_remainingDebt);
             daiAmount = _remainingDebt;
+        } else {
+            daiAmount = _daiAmount;
         }
     }
 
 
+    /**
+    * @dev Checks and ensures that the 0.005 ether requirement on CDP is not hit
+    * @param _releasedPeth - Amount of Peth released from unraveling the first last CDP layer
+    * @param _remainingPeth - Amount of remaining peth in CDP
+    * @param _remainingDebt - Amount of remaining Debt (DAI) in CDP
+    * @param _cdpID - verbatim
+    */
     function dustPanCondition(
         uint256 _releasedPeth,
         uint256 _remainingPeth,
         uint256 _remainingDebt,
         bytes32 _cdpID)
         internal
-        returns (uint256 releasedPeth, uint256 remainingPeth)
+        returns (uint256 releasedPeth, uint256 remainingPeth, bool breakCondition)
     {
 
         // dust pan condition, where remainingPeth cannot be below 0.005 peth
@@ -458,13 +505,13 @@ contract CDPLeverage is DSMath {
                 releasedPeth = sub(_remainingPeth,5000000010000000);
                 releaseWeth(_cdpID, releasedPeth);
                 remainingPeth = 5000000010000000;
-                break;
+                breakCondition = true;
             }
         } else {
             releasedPeth = _releasedPeth;
             remainingPeth = _remainingPeth;
+            breakCondition = false;
         }
-
 
     }
 
@@ -472,7 +519,8 @@ contract CDPLeverage is DSMath {
     /**
     * @dev Free's locked CDP collateral (PETH) and converts it to WETH
     * @param _cdpID - verbatim
-    * @param _peth - amount of peth
+    * @param _remainingDebt - remaining debt (DAI) in CDP
+    * @param _remainingPeth - amount of peth remaining in CDP
     */
     function releaseFinalPeth(
         bytes32 _cdpID,

@@ -1,5 +1,7 @@
 pragma solidity ^0.4.22;
 
+// https://github.com/dapphub/ds-math/blob/master/src/math.sol
+
 contract DSMath {
     function add(uint x, uint y) internal pure returns (uint z) {
         require((z = x + y) >= x);
