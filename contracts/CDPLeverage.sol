@@ -195,6 +195,7 @@ contract CDPLeverage is DSMath {
         uint256 remainingPeth = tub.ink(sender.cdpID);                       // retrieve value of collatoral in CDP
         uint256 payout;
         uint256 wethAmount;
+        uint256 freedWethAmount;
         uint256 daiAmount = sender.daiAmountFinal;
 
         // checks if CDP debt is 0
@@ -204,9 +205,9 @@ contract CDPLeverage is DSMath {
             //*** 1. Remaining PETH in debt-free CDP
             //*** 2. Outstanding DAI from final layer
 
-            releaseWeth(sender.cdpID, remainingPeth);
-            wethAmount = marketBuy(weth, dai, sender.daiAmountFinal);
-            payout = add(remainingPeth,wethAmount);
+            freedWethAmount = releaseWeth(sender.cdpID, remainingPeth);
+            wethAmount = marketBuy(weth, dai, daiAmount);
+            payout = add(freedWethAmount,wethAmount);
 
         } else {
 
@@ -219,18 +220,17 @@ contract CDPLeverage is DSMath {
             uint256 excessWeth;
 
             // Pay for governance fee
-            uint256 wethFee = payFee(sender.cdpID, remainingDebt);
-            excessWeth = sub(msg.value,wethFee);
+            excessWeth = sub(msg.value,payFee(sender.cdpID, remainingDebt));
 
             // wipe last layer of cdp
             remainingDebt = wipeDebt(sender.cdpID, daiAmount, remainingDebt);
             releasedPeth = wdiv(wmul(daiAmount,makerLR),sender.purchPrice);
-            releaseWeth(sender.cdpID, releasedPeth);
+            freedWethAmount = releaseWeth(sender.cdpID, releasedPeth);
             remainingPeth -= releasedPeth;
 
             // unravel CDP onion
-            (releasedPeth, remainingPeth, remainingDebt, excessDai) = unravelCDP(
-                releasedPeth,
+            (freedWethAmount, remainingPeth, remainingDebt, excessDai) = unravelCDP(
+                freedWethAmount,
                 remainingPeth,
                 remainingDebt,
                 sender.cdpID,
@@ -248,7 +248,7 @@ contract CDPLeverage is DSMath {
             // convert left over dai to weth
             wethAmount = marketBuy(weth, dai, excessDai);
 
-            payout = add(add(add(releasedPeth,wethAmount),finalPeth),excessWeth);
+            payout = add(add(add(freedWethAmount,wethAmount),finalPeth),excessWeth);
         }
 
         // convert WETH to ETH
@@ -324,6 +324,19 @@ contract CDPLeverage is DSMath {
         returns (uint pethAmount)
     {
         pethAmount = rdiv(_wethAmount, wmul(tub.gap(), tub.per())) - 1;      // WAD
+    }
+
+
+    /**
+    * @dev Returns amount of WETH for a given amount of PETH at exchange rate
+    * @param _pethAmount - literal
+    */
+    function peth2weth(uint256 _pethAmount)
+        view
+        public
+        returns (uint wethAmount)
+    {
+        wethAmount = rmul((_pethAmount + 1), wmul(tub.gap(), tub.per()));    // WAD
     }
 
 
@@ -410,33 +423,34 @@ contract CDPLeverage is DSMath {
 
     /**
     * @dev Unravels CDP onion by wiping DAI, freeing PETH, PETH -> WETH, WETH -> DAI, repeat
-    * @param _releasedPeth - Amount of Peth released from unraveling the first last CDP layer
+    * @param _freedWethAmount - Amount of Weth released from unraveling the first last CDP layer
     * @param _remainingPeth - Amount of remaining peth in CDP
     * @param _remainingDebt - Amount of remaining Debt (DAI) in CDP
     * @param _cdpID - verbatim
     * @param _priceFloorETH - Price floor in ETH
     */
     function unravelCDP(
-        uint256 _releasedPeth,
+        uint256 _freedWethAmount,
         uint256 _remainingPeth,
         uint256 _remainingDebt,
         bytes32 _cdpID,
         uint256 _priceFloorETH)
         internal
         returns (
-            uint256 releasedPeth,
+            uint256 freedWethAmount,
             uint256 remainingPeth,
             uint256 remainingDebt,
             uint256 excessDai)
     {
-        releasedPeth = _releasedPeth;
+        freedWethAmount = _freedWethAmount;
         remainingPeth = _remainingPeth;
         remainingDebt = _remainingDebt;
         bool breakCondition;
         uint256 daiAmount;
+        uint256 releasedPeth;
 
         while (remainingDebt > 0) {
-            daiAmount = marketBuy(dai, weth, releasedPeth);
+            daiAmount = marketBuy(dai, weth, freedWethAmount);
 
             (daiAmount, excessDai) = zeroDebtCondition(
                 daiAmount,
@@ -455,7 +469,7 @@ contract CDPLeverage is DSMath {
 
             if (breakCondition) { break; }
 
-            releaseWeth(_cdpID, releasedPeth);
+            freedWethAmount = releaseWeth(_cdpID, releasedPeth);
             remainingPeth -= releasedPeth;
         }
 
@@ -545,9 +559,11 @@ contract CDPLeverage is DSMath {
     */
     function releaseWeth(bytes32 _cdpID, uint256 _peth)
         internal
+        returns (uint256 wethAmount)
     {
         tub.free(_cdpID, _peth);                                             // empty all unlocked peth to this account
         tub.exit(_peth);                                                     // convert PETH to WETH
+        wethAmount = peth2weth(_peth);                                       // exchange rate
     }
 
 
