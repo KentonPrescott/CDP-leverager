@@ -35,7 +35,7 @@
     "webpack-dev-server": "^2.3.0"
   },
   "dependencies": {
-    "truffle": "^4.1.7",
+    "truffle": "^4.1.8",
     "truffle-hdwallet-provider": "0.0.3"
   }
 }

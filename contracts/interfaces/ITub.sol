@@ -11,6 +11,7 @@ interface ITub {
     function gem() external view returns (DSToken);
     function pip() external view returns (DSValue);
     function pep() external view returns (DSValue);
+    function vox() external view returns (DSValue);
     function gov() external view returns (DSToken);
     function fee() external view returns (uint256);
     function tax() external view returns (uint256);
@@ -21,6 +22,7 @@ interface ITub {
     function rap(bytes32 cup) external returns (uint);
     function tab(bytes32 cup) external returns (uint);
     function chi() external returns (uint);
+    function tag() external view returns (uint);
 
     function open() external returns (bytes32 cup);
     function give(bytes32 cup, address guy) external;

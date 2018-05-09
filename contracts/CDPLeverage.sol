@@ -3,6 +3,7 @@ pragma solidity ^0.4.22;
 import "./interfaces/ITub.sol";
 import "./interfaces/DSValue.sol";
 import "./interfaces/IWETH.sol";
+import "./interfaces/IVox.sol";
 import "./interfaces/IMatchingMarket.sol";
 import "./DSMath.sol";
 
@@ -25,7 +26,8 @@ contract CDPLeverage is DSMath {
     DSToken public gov;
     DSValue public pip;
     DSValue public pep;
-    uint256 public makerLR;
+    DSValue public vox;
+    uint256 public mat;
     uint256 public fee;
     uint256 public axe;
     IMatchingMarket public dex;
@@ -79,9 +81,10 @@ contract CDPLeverage is DSMath {
         gov = tub.gov();
         fee = tub.fee();
         axe = tub.axe();
+        vox = tub.vox();
         dex = IMatchingMarket(_oasisDex);
 
-        makerLR = ray2wad(tub.mat());
+        mat = ray2wad(tub.mat());
 
         // we approve tub, tap, and dex to access weth, peth, and dai contracts
         weth.approve(tub, uint(-1));
@@ -123,7 +126,7 @@ contract CDPLeverage is DSMath {
         require(investors[msg.sender].principalETH == 0, "Previous position must be liquidated before opening a new one");
 
         // calculate collateralization ratio from price floor
-        uint256 collatRatio = wdiv(wmul(currPriceEth, makerLR),_priceFloorETH);
+        uint256 collatRatio = wdiv(wmul(currPriceEth, mat),_priceFloorETH);
 
         //Add information about investor to database
         Investor memory sender;
@@ -220,11 +223,11 @@ contract CDPLeverage is DSMath {
             uint256 excessWeth;
 
             // Pay for governance fee
-            excessWeth = sub(msg.value,payFee(sender.cdpID, remainingDebt));
+            excessWeth = sub(msg.value, payFee(sender.cdpID, remainingDebt));
 
             // wipe last layer of cdp
             remainingDebt = wipeDebt(sender.cdpID, daiAmount, remainingDebt);
-            releasedPeth = wdiv(wmul(daiAmount,makerLR),sender.purchPrice);
+            releasedPeth = availablePeth(sender.cdpID);
             freedWethAmount = releaseWeth(sender.cdpID, releasedPeth);
             remainingPeth -= releasedPeth;
 
@@ -233,12 +236,11 @@ contract CDPLeverage is DSMath {
                 freedWethAmount,
                 remainingPeth,
                 remainingDebt,
-                sender.cdpID,
-                sender.priceFloor
+                sender.cdpID
             );
 
             // check and free remaining peth
-            uint256 finalPeth = releaseFinalPeth(
+            uint256 finalWeth = releaseFinalPeth(
                 sender.cdpID,
                 remainingDebt,
                 remainingPeth
@@ -248,7 +250,7 @@ contract CDPLeverage is DSMath {
             // convert left over dai to weth
             wethAmount = marketBuy(weth, dai, excessDai);
 
-            payout = add(add(add(freedWethAmount,wethAmount),finalPeth),excessWeth);
+            payout = add(add(add(freedWethAmount,wethAmount),finalWeth),excessWeth);
         }
 
         // convert WETH to ETH
@@ -306,7 +308,7 @@ contract CDPLeverage is DSMath {
         // re-assignment of variables
         sender.principalETH += msg.value;
         sender.collatRatio = wdiv(wmul(totalPeth,currPricePeth),sender.drawnDai);
-        sender.priceFloor = wdiv(wmul(currPriceEth,makerLR),sender.collatRatio);
+        sender.priceFloor = wdiv(wmul(currPriceEth,mat),sender.collatRatio);
 
         investors[msg.sender] = sender;
 
@@ -355,9 +357,23 @@ contract CDPLeverage is DSMath {
         gov = tub.gov();
         fee = tub.fee();
         axe = tub.axe();
-        makerLR = ray2wad(tub.mat());
+        mat = ray2wad(tub.mat());
 
         return true;
+    }
+
+
+    /**
+    * @dev Returns the maximum PETH that can be freed. After freeing, CDP CR will be nearly 150%
+    * @param _cdpID - ID of CDP
+    */
+    function availablePeth(bytes32 _cdpID)
+        public
+        returns (uint pethAmount)
+    {
+        pethAmount = sub(tub.ink(_cdpID),
+            wdiv(wmul(wmul(tub.tab(_cdpID),mat),
+                IVox(vox).par()), tub.tag())) - 1;
     }
 
 
@@ -427,14 +443,12 @@ contract CDPLeverage is DSMath {
     * @param _remainingPeth - Amount of remaining peth in CDP
     * @param _remainingDebt - Amount of remaining Debt (DAI) in CDP
     * @param _cdpID - verbatim
-    * @param _priceFloorETH - Price floor in ETH
     */
     function unravelCDP(
         uint256 _freedWethAmount,
         uint256 _remainingPeth,
         uint256 _remainingDebt,
-        bytes32 _cdpID,
-        uint256 _priceFloorETH)
+        bytes32 _cdpID)
         internal
         returns (
             uint256 freedWethAmount,
@@ -458,7 +472,7 @@ contract CDPLeverage is DSMath {
             );
 
             remainingDebt = wipeDebt(_cdpID, daiAmount, remainingDebt);
-            releasedPeth = wdiv(wmul(daiAmount,makerLR),weth2peth(_priceFloorETH));
+            releasedPeth = availablePeth(_cdpID);
 
             (releasedPeth, remainingPeth, breakCondition) = dustPanCondition(
                 releasedPeth,
@@ -467,7 +481,7 @@ contract CDPLeverage is DSMath {
                 _cdpID
             );
 
-            if (breakCondition) { break; }
+            if (breakCondition) { freedWethAmount = releasedPeth; break; }
 
             freedWethAmount = releaseWeth(_cdpID, releasedPeth);
             remainingPeth -= releasedPeth;
@@ -517,7 +531,10 @@ contract CDPLeverage is DSMath {
                 releasedPeth = _remainingPeth;
             } else {
                 releasedPeth = sub(_remainingPeth,5000000010000000);
-                releaseWeth(_cdpID, releasedPeth);
+
+                // freedWethAmount will be assigned to releasedPeth @ breakCondition
+                // This is done to conserve local variables in liquidate()
+                releasedPeth = releaseWeth(_cdpID, releasedPeth);
                 remainingPeth = 5000000010000000;
                 breakCondition = true;
             }
@@ -541,13 +558,12 @@ contract CDPLeverage is DSMath {
         uint256 _remainingDebt,
         uint256 _remainingPeth)
         internal
-        returns (uint256 finalPeth)
+        returns (uint256 finalWeth)
     {
         if (_remainingDebt == 0 && _remainingPeth != 0) {
-            finalPeth = tub.ink(_cdpID);
-            releaseWeth(_cdpID, finalPeth);
+            finalWeth = releaseWeth(_cdpID, tub.ink(_cdpID));
         } else {
-            finalPeth = 0;
+            finalWeth = 0;
         }
     }
 
