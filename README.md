@@ -1,6 +1,13 @@
 # CDP-leverager
 
-CDP-Leverager is a tool to streamline the process of reinvesting in one CDP, allowing you to increase your leverage up to 3x. Please use caution, as the tool is still under development.
+CDP-Leverager is a tool to streamline the process of reinvesting in one CDP, allowing you to increase your leverage and margin up to 3x. Please use caution, as the tool is still under development.
+
+___________________________
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+___________________________
 
 ## Setup
 
