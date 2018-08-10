@@ -1,6 +1,6 @@
 # CDP-leverager
 
-CDP-Leverager is a tool to streamline the process of reinvesting in one CDP, allowing you to increase your leverage and margin up to 3x. Please use caution, as the tool is still under development.
+Smart contracts for [CDP-Leverager](https://leverager.now.sh/), a tool to streamline the process of reinvesting in one CDP, allowing you to increase your leverage and margin up to 3x. Please use caution, as the tool is still under development.
 
 ___________________________
 This program is distributed in the hope that it will be useful,
